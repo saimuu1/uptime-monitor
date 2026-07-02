@@ -4,23 +4,41 @@ A self-hosted service that watches your websites/APIs, records whether they're u
 and how long they take, and detects when they go down or recover.
 
 This repo follows the milestone plan in [`PLAN.md`](PLAN.md). **Current milestone:
-v1 — a single process that checks each monitor on its interval, stores every
-result, and logs + records incidents on up→down / down→up transitions.**
+v2 — the scheduler, checkers, and evaluator are separate processes connected by a
+NATS queue, so checking scales horizontally and survives a checker dying.**
 
-## Architecture (v1)
+## Architecture
+
+**v1 (all-in-one, still available as `cmd/monitor`):** one process, one goroutine
++ ticker per monitor, checking → storing → evaluating in-line.
+
+**v2 (the split):**
 
 ```
-config.yaml ──▶ internal/config ──▶ upsert into monitors
-                                         │
-cmd/monitor: one goroutine + ticker per monitor
-   │  internal/check   perform HTTP request (context timeout) → Result
-   │  internal/store   write a `checks` row (TimescaleDB hypertable)
-   │  internal/evaluate  Transition(prevUp, nowUp) → None | Down | Recovered
-   └─ on Down: open incident + log DOWN;  on Recovered: resolve + log RECOVERED
+                    ┌──────────────┐
+   reads monitors ─▶│  scheduler   │  one ticker per monitor
+                    └──────┬───────┘
+                           │ publish CheckJob
+                    NATS  checks.request  (queue group "checkers")
+                           │
+              ┌────────────┼────────────┐   each job → exactly one checker
+              ▼            ▼             ▼
+        ┌─────────┐  ┌─────────┐   ┌─────────┐   stateless, no DB,
+        │checker A│  │checker B│ … │checker N│   run as many as you want
+        └────┬────┘  └────┬────┘   └────┬────┘
+             └───────── publish CheckResult ─────────┐
+                    NATS  checks.result              │
+                           │                         ▼
+                    ┌──────────────┐   writes `checks`, owns incident state,
+                    │  evaluator   │   logs DOWN / RECOVERED (single instance)
+                    └──────────────┘
 ```
 
-TimescaleDB (Postgres + the timescaledb extension) backs both the relational
-tables (`monitors`, `incidents`) and the time-series `checks` hypertable.
+Shared message types live in `internal/message`. Checkers join the `checkers`
+NATS **queue group**, so each job is delivered to exactly one of them — that's the
+load balancing and the failover. TimescaleDB (Postgres + the timescaledb
+extension) backs both the relational tables (`monitors`, `incidents`) and the
+time-series `checks` hypertable.
 
 ## Prerequisites
 
@@ -41,9 +59,19 @@ goose -dir migrations postgres "$DATABASE_URL" up
 # 3. Configure what to watch
 cp config.example.yaml config.yaml   # then edit
 
-# 4. Run the monitor
+# 4a. Run the all-in-one v1 process...
 go run ./cmd/monitor
+
+# 4b. ...or the v2 split (needs NATS from compose). In separate terminals:
+go run ./cmd/evaluator                 # one instance (owns incident state)
+REGION=east go run ./cmd/checker       # run as many checkers as you like
+REGION=west go run ./cmd/checker
+go run ./cmd/scheduler                 # publishes the check jobs
 ```
+
+`REGION` tags each checker's results (defaults to `local`); `NATS_URL` overrides
+the queue connection (default `nats://127.0.0.1:4222`). Kill a checker and watch
+the others keep pulling jobs.
 
 `config.yaml` is the seed: on start its monitors are upserted (matched by `name`)
 into the DB, which is the source of truth thereafter. `DATABASE_URL` overrides the

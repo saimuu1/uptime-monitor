@@ -98,7 +98,7 @@ func runMonitor(ctx context.Context, st *store.Store, m store.Monitor) {
 	// Check once immediately, then on every tick.
 	doCheck := func() {
 		res := check.Do(ctx, cm)
-		if err := st.InsertCheck(ctx, m.ID, region, res); err != nil {
+		if err := st.InsertCheck(ctx, m.ID, region, time.Now(), res); err != nil {
 			log.Printf("[%s] store check: %v", m.Name, err)
 		}
 
