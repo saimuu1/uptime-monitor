@@ -136,6 +136,51 @@ func (s *Store) OpenIncident(ctx context.Context, monitorID int64, cause string)
 	return nil
 }
 
+// Status is a monitor's current state for the status page.
+type Status struct {
+	ID        int64
+	Name      string
+	URL       string
+	Down      bool       // has an open (unresolved) incident
+	Uptime24h float64    // fraction 0..1 of checks up in the last 24h
+	Checks24h int        // number of checks in the last 24h (0 => "no data")
+	LastCheck *time.Time // most recent check time, nil if none in 24h
+}
+
+// MonitorStatuses returns the current state of every enabled monitor: whether
+// it has an open incident, its 24h uptime, and when it was last checked.
+func (s *Store) MonitorStatuses(ctx context.Context) ([]Status, error) {
+	const q = `
+		SELECT m.id, m.name, m.url,
+			EXISTS (SELECT 1 FROM incidents i
+				WHERE i.monitor_id = m.id AND i.resolved_at IS NULL) AS down,
+			COALESCE(AVG(CASE WHEN c.up THEN 1.0 ELSE 0.0 END), 1.0) AS uptime,
+			COUNT(c.*) AS checks,
+			MAX(c.time) AS last_check
+		FROM monitors m
+		LEFT JOIN checks c
+			ON c.monitor_id = m.id AND c.time > now() - interval '24 hours'
+		WHERE m.enabled
+		GROUP BY m.id, m.name, m.url
+		ORDER BY m.id`
+	rows, err := s.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("query statuses: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Status
+	for rows.Next() {
+		var st Status
+		if err := rows.Scan(&st.ID, &st.Name, &st.URL, &st.Down,
+			&st.Uptime24h, &st.Checks24h, &st.LastCheck); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
 // ResolveIncident closes the currently-open incident for a monitor.
 func (s *Store) ResolveIncident(ctx context.Context, monitorID int64) error {
 	const q = `
