@@ -1,0 +1,11 @@
+# Copy to config.yaml and edit. On first run these are upserted into the
+# `monitors` table (matched by name); after that the DB is the source of truth.
+monitors:
+  - name: "Example (always up)"
+    url: "https://example.com"
+    interval_seconds: 30
+
+  - name: "Local target (kill me to test)"
+    url: "http://localhost:8080"
+    interval_seconds: 5
+    expected_status: 200
