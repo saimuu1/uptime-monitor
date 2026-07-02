@@ -1,0 +1,24 @@
+services:
+  db:
+    # TimescaleDB is Postgres + the timescaledb extension, so this single
+    # container backs both the relational tables (monitors, incidents) and the
+    # time-series hypertable (checks) in v1.
+    image: timescale/timescaledb:latest-pg16
+    container_name: uptime-db
+    environment:
+      POSTGRES_USER: uptime
+      POSTGRES_PASSWORD: uptime
+      POSTGRES_DB: uptime
+    ports:
+      # Host 5433 to avoid clashing with other local Postgres (e.g. job-queue).
+      - "5433:5432"
+    volumes:
+      - uptime-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uptime -d uptime"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  uptime-db-data:

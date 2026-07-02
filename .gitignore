@@ -1,0 +1,13 @@
+# Real config may contain private URLs / credentials — keep only the example.
+config.yaml
+
+# Build output
+/bin/
+/monitor
+*.exe
+
+# Env
+.env
+
+# macOS
+.DS_Store
