@@ -93,11 +93,12 @@ func (s *Store) EnabledMonitors(ctx context.Context) ([]Monitor, error) {
 	return out, rows.Err()
 }
 
-// InsertCheck records one check result in the time-series hypertable.
-func (s *Store) InsertCheck(ctx context.Context, monitorID int64, region string, r check.Result) error {
+// InsertCheck records one check result in the time-series hypertable at the
+// time the check actually ran.
+func (s *Store) InsertCheck(ctx context.Context, monitorID int64, region string, at time.Time, r check.Result) error {
 	const q = `
 		INSERT INTO checks (time, monitor_id, region, up, status_code, latency_ms, error)
-		VALUES (now(), $1, $2, $3, $4, $5, $6)`
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`
 	// Pass NULL for status/error when they carry no signal.
 	var status *int
 	if r.StatusCode != 0 {
@@ -107,7 +108,7 @@ func (s *Store) InsertCheck(ctx context.Context, monitorID int64, region string,
 	if r.Err != "" {
 		errStr = &r.Err
 	}
-	_, err := s.pool.Exec(ctx, q, monitorID, region, r.Up, status, r.LatencyMs, errStr)
+	_, err := s.pool.Exec(ctx, q, at, monitorID, region, r.Up, status, r.LatencyMs, errStr)
 	if err != nil {
 		return fmt.Errorf("insert check: %w", err)
 	}

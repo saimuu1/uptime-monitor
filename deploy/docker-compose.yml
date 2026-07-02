@@ -20,5 +20,19 @@ services:
       timeout: 5s
       retries: 5
 
+  # v2: message queue that decouples the scheduler from the checkers.
+  nats:
+    image: nats:2-alpine
+    container_name: uptime-nats
+    command: ["-m", "8222"] # enable the monitoring/health endpoint on 8222
+    ports:
+      - "4222:4222" # client connections
+      - "8222:8222" # http monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   uptime-db-data:
