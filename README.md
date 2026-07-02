@@ -4,8 +4,9 @@ A self-hosted service that watches your websites/APIs, records whether they're u
 and how long they take, and detects when they go down or recover.
 
 This repo follows the milestone plan in [`PLAN.md`](PLAN.md). **Current milestone:
-v2 — the scheduler, checkers, and evaluator are separate processes connected by a
-NATS queue, so checking scales horizontally and survives a checker dying.**
+v3 — checkers run in multiple regions; the evaluator only alerts when a majority
+of regions *agree* a monitor is down and the state holds long enough to rule out
+flapping. It sends webhook alerts and serves a status page.**
 
 ## Architecture
 
@@ -40,6 +41,21 @@ load balancing and the failover. TimescaleDB (Postgres + the timescaledb
 extension) backs both the relational tables (`monitors`, `incidents`) and the
 time-series `checks` hypertable.
 
+**v3 adds, all inside the evaluator (`internal/evaluate.Monitor`):**
+
+- **Consensus** — each region's latest result is a vote. A monitor is down only
+  on a *strict majority* of fresh regions reporting down; ties stay up. A region
+  whose checker died stops voting once its last sample goes stale
+  (`CONSENSUS_FRESHNESS`), so it can't cause a false alarm.
+- **Flap suppression** — a new consensus must hold for `CONSENSUS_STABILITY`
+  before it's committed, so a brief blip never opens an incident.
+- **Alerts** (`internal/alert`) — on committed DOWN/RECOVERED, POST to a
+  Discord/Slack webhook (`ALERT_WEBHOOK_URL`; unset = log only).
+- **Status page** (`cmd/web` + `web/`) — current state + 24h uptime per monitor.
+
+The engine is pure (time is injected), so consensus and flapping are unit-tested
+without a clock or network — see `internal/evaluate/evaluate_test.go`.
+
 ## Prerequisites
 
 - Go 1.22+
@@ -62,16 +78,20 @@ cp config.example.yaml config.yaml   # then edit
 # 4a. Run the all-in-one v1 process...
 go run ./cmd/monitor
 
-# 4b. ...or the v2 split (needs NATS from compose). In separate terminals:
-go run ./cmd/evaluator                 # one instance (owns incident state)
-REGION=east go run ./cmd/checker       # run as many checkers as you like
-REGION=west go run ./cmd/checker
+# 4b. ...or the v2/v3 split (needs NATS from compose). In separate terminals:
+ALERT_WEBHOOK_URL=https://discord.com/api/webhooks/... go run ./cmd/evaluator
+REGION=east    go run ./cmd/checker    # run checkers in as many regions as you like
+REGION=west    go run ./cmd/checker
+REGION=central go run ./cmd/checker
 go run ./cmd/scheduler                 # publishes the check jobs
+go run ./cmd/web                       # status page at http://localhost:8090
 ```
 
-`REGION` tags each checker's results (defaults to `local`); `NATS_URL` overrides
-the queue connection (default `nats://127.0.0.1:4222`). Kill a checker and watch
-the others keep pulling jobs.
+Knobs (all optional, with defaults): `REGION` (`local`) tags a checker's results;
+`NATS_URL` (`nats://127.0.0.1:4222`); `ALERT_WEBHOOK_URL` (unset = log only);
+`CONSENSUS_FRESHNESS` (`30s`); `CONSENSUS_STABILITY` (`5s`); `WEB_ADDR` (`:8090`).
+Kill one region's checker and monitoring continues with no false alarm; take the
+target down for real and every surviving region agrees → alert + status page flips.
 
 `config.yaml` is the seed: on start its monitors are upserted (matched by `name`)
 into the DB, which is the source of truth thereafter. `DATABASE_URL` overrides the
@@ -94,7 +114,9 @@ go test ./...
 ```
 
 - `internal/check` — table-driven against `httptest` (200 / 500 / timeout / refused).
-- `internal/evaluate` — the up/down state machine, including a full outage sequence.
+- `internal/evaluate` — the state machine: consensus majority, tie handling, stale
+  regions excluded, flap suppression, and sustained-outage commit.
+- `internal/alert` — webhook payload + non-2xx handling against `httptest`.
 
 ## Handy queries
 
@@ -108,20 +130,26 @@ SELECT name, up, count(*) FROM checks c JOIN monitors m ON m.id=c.monitor_id
 
 | Path | Role |
 |---|---|
-| `cmd/monitor` | v1 single binary (splits into api/checker/evaluator in v2) |
+| `cmd/monitor` | v1 all-in-one binary (still usable) |
+| `cmd/scheduler` | v2: owns monitors, publishes check jobs |
+| `cmd/checker` | v2: stateless worker, one per region |
+| `cmd/evaluator` | v2/v3: stores checks, consensus, incidents, alerts |
+| `cmd/web` | v3: status page server |
 | `internal/config` | load YAML, upsert monitors |
 | `internal/check` | perform one HTTP check |
 | `internal/store` | database reads/writes (pgx) |
-| `internal/evaluate` | up/down state machine (grows into consensus in v3) |
-| `internal/alert` | notifications (v3) |
+| `internal/evaluate` | v1 transition + v3 consensus/flap engine |
+| `internal/alert` | webhook notifications |
+| `internal/message` | NATS subjects + job/result payloads |
+| `internal/env` | shared env-var config with defaults |
+| `web` | embedded status-page template |
 | `migrations` | goose SQL migrations |
 | `deploy` | docker-compose (+ terraform in v4) |
 
 ## Next milestones
 
-See `PLAN.md`: v2 splits scheduler/checker/evaluator over NATS; v3 adds
-multi-region consensus + a status page + real webhook alerts; v4 deploys via
-Terraform to DigitalOcean.
+See `PLAN.md`: v4 dockerizes each binary and deploys via Terraform to
+DigitalOcean across real regions, with CI/CD and Prometheus/Grafana.
 
 ## Stopping
 

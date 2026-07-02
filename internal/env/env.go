@@ -1,8 +1,11 @@
-// Package env centralizes the environment-variable lookups shared by the v2
+// Package env centralizes the environment-variable lookups shared by the
 // binaries, each with a sensible local-dev default.
 package env
 
-import "os"
+import (
+	"os"
+	"time"
+)
 
 // DBURL returns DATABASE_URL, defaulting to the local docker-compose Postgres
 // (host port 5433 to avoid clashing with other local Postgres instances).
@@ -20,9 +23,38 @@ func Region() string {
 	return orDefault("REGION", "local")
 }
 
+// ConsensusFreshness: ignore a region's sample once older than this (v3).
+func ConsensusFreshness() time.Duration {
+	return orDuration("CONSENSUS_FRESHNESS", 30*time.Second)
+}
+
+// ConsensusStability: a new consensus must hold this long before it commits (v3).
+func ConsensusStability() time.Duration {
+	return orDuration("CONSENSUS_STABILITY", 5*time.Second)
+}
+
+// AlertWebhookURL is the Discord/Slack incoming webhook; empty disables alerts.
+func AlertWebhookURL() string {
+	return os.Getenv("ALERT_WEBHOOK_URL")
+}
+
+// WebAddr is the listen address for the status page.
+func WebAddr() string {
+	return orDefault("WEB_ADDR", ":8090")
+}
+
 func orDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return def
+}
+
+func orDuration(key string, def time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
 	}
 	return def
 }
