@@ -63,7 +63,9 @@ services:
       <<: *app-env
       CONFIG_PATH: /config.yaml
     volumes:
-      - ../config.yaml:/config.yaml:ro # the monitor list to seed
+      # Seed the DB on first run from the committed example (always present, so a
+      # fresh clone just works). Add your real sites from the web page afterwards.
+      - ../config.example.yaml:/config.yaml:ro
     depends_on:
       db: { condition: service_healthy }
       nats: { condition: service_healthy }

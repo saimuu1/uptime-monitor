@@ -51,6 +51,10 @@ func (s *Store) Close() { s.pool.Close() }
 // the same name. Config is the source of truth on (re)start; the returned row
 // carries the DB-assigned id.
 func (s *Store) UpsertMonitor(ctx context.Context, m Monitor) (Monitor, error) {
+	// notify_emails is NOT NULL; a nil slice would encode as NULL, so normalize.
+	if m.NotifyEmails == nil {
+		m.NotifyEmails = []string{}
+	}
 	const q = `
 		INSERT INTO monitors (name, url, method, interval_seconds, timeout_ms, expected_status, enabled, notify_emails)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
