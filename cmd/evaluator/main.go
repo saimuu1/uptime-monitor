@@ -40,6 +40,7 @@ type entry struct {
 type evaluator struct {
 	st        *store.Store
 	notifiers []alert.Notifier
+	defaultTo string // fallback email for monitors with no explicit recipients
 	cfg       evaluate.Config
 	mu        sync.Mutex
 	monitors  map[int64]*entry
@@ -60,10 +61,12 @@ func main() {
 		notifiers = append(notifiers, alert.NewWebhook(url))
 		log.Print("alerts: webhook enabled")
 	}
+	defaultTo := ""
 	if env.SMTPHost() != "" && env.SMTPUser() != "" {
 		notifiers = append(notifiers, alert.NewEmail(
 			env.SMTPHost(), env.SMTPPort(), env.SMTPUser(), env.SMTPPass(), env.SMTPFrom()))
-		log.Print("alerts: email enabled")
+		defaultTo = env.AlertEmailTo()
+		log.Printf("alerts: email enabled (default recipient: %s)", defaultTo)
 	}
 	if len(notifiers) == 0 {
 		log.Print("alerts: none configured, logging only")
@@ -72,6 +75,7 @@ func main() {
 	e := &evaluator{
 		st:        st,
 		notifiers: notifiers,
+		defaultTo: defaultTo,
 		cfg:       evaluate.Config{Freshness: env.ConsensusFreshness(), Stability: env.ConsensusStability()},
 		monitors:  make(map[int64]*entry),
 	}
@@ -203,13 +207,14 @@ func (e *evaluator) commit(ctx context.Context, en *entry, ev evaluate.Event) {
 	metrics.MonitorUp.WithLabelValues(en.name).Set(up)
 }
 
-// recipients fetches a monitor's alert emails at send time (always fresh).
+// recipients fetches a monitor's alert emails at send time (always fresh),
+// falling back to the default recipient when the monitor lists none.
 func (e *evaluator) recipients(ctx context.Context, monitorID int64) []string {
 	to, err := e.st.NotifyEmails(ctx, monitorID)
 	if err != nil {
 		log.Printf("recipients for monitor %d: %v", monitorID, err)
 	}
-	return to
+	return alert.Recipients(to, e.defaultTo)
 }
 
 func (e *evaluator) notify(ctx context.Context, ev alert.Event) {
