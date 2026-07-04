@@ -1,0 +1,98 @@
+{
+  "uid": "uptime-main",
+  "title": "Uptime Monitor",
+  "tags": ["uptime"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-15m", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Check rate (per sec) by result",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (result) (rate(uptime_checks_total[1m]))",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "state-timeline",
+      "title": "Monitor up/down",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "down", "color": "red" }, "1": { "text": "up", "color": "green" } } }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "uptime_monitor_up",
+          "legendFormat": "{{monitor}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Incidents opened (total)",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(uptime_incidents_opened_total)"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Alerts sent (5m increase) by kind",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (kind) (increase(uptime_alerts_sent_total[5m]))",
+          "legendFormat": "{{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Check latency p95 (ms) by region",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le, region) (rate(uptime_check_latency_ms_bucket[5m])))",
+          "legendFormat": "{{region}}"
+        }
+      ]
+    }
+  ]
+}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/saimuu1/uptime-monitor/internal/env"
 	"github.com/saimuu1/uptime-monitor/internal/message"
+	"github.com/saimuu1/uptime-monitor/internal/metrics"
 	"github.com/saimuu1/uptime-monitor/internal/store"
 )
 
@@ -43,6 +44,8 @@ func main() {
 		log.Fatal("no enabled monitors")
 	}
 	log.Printf("scheduling %d monitor(s)", len(monitors))
+
+	go metrics.Serve(ctx, env.MetricsAddr())
 
 	// One ticker per monitor, each publishing a job on its own interval.
 	var wg sync.WaitGroup
@@ -75,7 +78,9 @@ func publishLoop(ctx context.Context, nc *nats.Conn, m store.Monitor) {
 	publish := func() {
 		if err := nc.Publish(message.SubjectCheckRequest, payload); err != nil {
 			log.Printf("[%s] publish: %v", m.Name, err)
+			return
 		}
+		metrics.JobsPublished.Inc()
 	}
 
 	ticker := time.NewTicker(time.Duration(m.IntervalSeconds) * time.Second)

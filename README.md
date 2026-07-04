@@ -107,6 +107,23 @@ docker compose -f deploy/docker-compose.yml up db nats    # just infra (for host
 Status page: http://localhost:8090. Set `ALERT_WEBHOOK_URL` in your shell to wire
 alerts. This mirrors exactly what gets deployed to the cloud.
 
+### Monitor the monitor (Prometheus + Grafana)
+
+Every service exposes `/metrics` (`internal/metrics`). Add the `observability`
+profile to also run Prometheus (scrapes them) and Grafana (graphs them):
+
+```bash
+docker compose -f deploy/docker-compose.yml --profile observability up --build
+```
+
+- Grafana: http://localhost:3000 (anonymous viewing on) → dashboard **Uptime Monitor**
+- Prometheus: http://localhost:9090
+
+Metrics: `uptime_checks_total{region,result}`, `uptime_check_latency_ms`,
+`uptime_jobs_published_total`, `uptime_results_processed_total`,
+`uptime_incidents_opened_total`, `uptime_alerts_sent_total{kind}`, and
+`uptime_monitor_up{monitor}`.
+
 ### Deploy to DigitalOcean (v4)
 
 Terraform provisions a core box + one checker droplet per real region. See
@@ -171,6 +188,7 @@ SELECT name, up, count(*) FROM checks c JOIN monitors m ON m.id=c.monitor_id
 | `cmd/web` | v3: status page server |
 | `cmd/migrate` | v4: apply embedded migrations, then exit |
 | `internal/config` | load YAML, upsert monitors |
+| `internal/metrics` | Prometheus counters + /metrics server |
 | `internal/check` | perform one HTTP check |
 | `internal/store` | database reads/writes (pgx) |
 | `internal/evaluate` | v1 transition + v3 consensus/flap engine |
@@ -182,13 +200,15 @@ SELECT name, up, count(*) FROM checks c JOIN monitors m ON m.id=c.monitor_id
 | `deploy/Dockerfile` | one multi-stage build, parameterized by service |
 | `deploy/docker-compose.yml` | full stack in containers |
 | `deploy/terraform` | DigitalOcean infrastructure as code |
+| `deploy/prometheus.yml` | scrape config |
+| `deploy/grafana` | provisioned datasource + dashboard |
 | `.github/workflows` | CI (test + build) and image release |
 
 ## What's left
 
-The four core milestones are done. Optional polish from `PLAN.md`: Prometheus +
-Grafana ("monitor the monitor"), and the stretch goals (SSL-expiry checks,
-keyword checks, latency percentiles, maintenance windows, on-call escalation).
+All of `PLAN.md` v1–v4 is done, including Prometheus + Grafana. Remaining are the
+optional stretch goals: SSL-expiry checks, keyword checks, latency percentiles on
+the status page, maintenance windows, and on-call escalation.
 
 ## Stopping
 
