@@ -56,48 +56,63 @@ time-series `checks` hypertable.
 The engine is pure (time is injected), so consensus and flapping are unit-tested
 without a clock or network — see `internal/evaluate/evaluate_test.go`.
 
-## Prerequisites
+## Quickstart (just try it)
 
-- Go 1.22+
-- Docker (for the database)
-- [`goose`](https://github.com/pressly/goose) — `go install github.com/pressly/goose/v3/cmd/goose@latest`
-
-## Quickstart
+Only needs **Docker**. From a fresh clone:
 
 ```bash
-# 1. Start TimescaleDB (host port 5433 to avoid clashing with other local Postgres)
-docker compose -f deploy/docker-compose.yml up -d
+git clone https://github.com/saimuu1/uptime-monitor
+cd uptime-monitor
+docker compose -f deploy/docker-compose.yml up --build
+```
 
-# 2. Run migrations
+Then open **http://localhost:8090**. That one command builds and runs the whole
+system — database, queue, scheduler, two regional checkers, evaluator, and the web
+page (each a ~20MB container). It ships watching `example.com`; **add your own
+sites right on the page** (URL + email → Add) and they start getting checked
+within ~15s. No config files, no Go toolchain needed.
+
+Stop it with `Ctrl-C`, or `docker compose -f deploy/docker-compose.yml down`
+(add `-v` to also wipe the saved data).
+
+To get **email alerts**, see [Email alerts](#email-alerts-per-monitor-recipients)
+below. Optional monitoring dashboards: add `--profile observability` to the up
+command (Grafana on :3000, Prometheus on :9090).
+
+## Running it the hands-on way (for development)
+
+Prefer to run the pieces yourself? You'll need **Go 1.22+**, **Docker**, and
+[`goose`](https://github.com/pressly/goose)
+(`go install github.com/pressly/goose/v3/cmd/goose@latest`).
+
+```bash
+# 1. Start just the infrastructure (Postgres on host 5433, NATS on 4222)
+docker compose -f deploy/docker-compose.yml up -d db nats
+
+# 2. Migrate
 export DATABASE_URL="postgres://uptime:uptime@localhost:5433/uptime?sslmode=disable"
 goose -dir migrations postgres "$DATABASE_URL" up
 
-# 3. Configure what to watch
-cp config.example.yaml config.yaml   # then edit
+# 3. Seed some sites (optional — you can also add them from the web page)
+cp config.example.yaml config.yaml
 
 # 4a. Run the all-in-one v1 process...
 go run ./cmd/monitor
 
-# 4b. ...or the v2/v3 split (needs NATS from compose). In separate terminals:
-ALERT_WEBHOOK_URL=https://discord.com/api/webhooks/... go run ./cmd/evaluator
-REGION=east    go run ./cmd/checker    # run checkers in as many regions as you like
-REGION=west    go run ./cmd/checker
-REGION=central go run ./cmd/checker
-go run ./cmd/scheduler                 # publishes the check jobs
+# 4b. ...or the split services, in separate terminals:
+go run ./cmd/evaluator
+REGION=east go run ./cmd/checker      # run as many regions as you like
+REGION=west go run ./cmd/checker
+go run ./cmd/scheduler
 go run ./cmd/web                       # status page at http://localhost:8090
 ```
 
 Knobs (all optional, with defaults): `REGION` (`local`) tags a checker's results;
 `NATS_URL` (`nats://127.0.0.1:4222`); `ALERT_WEBHOOK_URL` (unset = log only);
-`CONSENSUS_FRESHNESS` (`30s`); `CONSENSUS_STABILITY` (`5s`); `WEB_ADDR` (`:8090`).
-Kill one region's checker and monitoring continues with no false alarm; take the
-target down for real and every surviving region agrees → alert + status page flips.
+`CONSENSUS_FRESHNESS` (`30s`); `CONSENSUS_STABILITY` (`5s`); `WEB_ADDR` (`:8090`);
+`CONFIG_PATH` (`config.yaml`).
 
-### Run the whole system in containers (v4)
-
-Each service is a ~20MB image built from one multi-stage [`deploy/Dockerfile`](deploy/Dockerfile).
-The full stack — db, NATS, a `migrate` step, scheduler, two regional checkers,
-evaluator, and web — comes up together:
+### The full stack in one command (what Quickstart runs)
 
 ```bash
 docker compose -f deploy/docker-compose.yml up --build   # everything

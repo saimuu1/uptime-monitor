@@ -1,20 +1,12 @@
-# Copy to config.yaml and edit. On first run these are upserted into the
-# `monitors` table (matched by name); after that the DB is the source of truth.
+# Default monitors the containerized stack ships with, so a fresh clone shows
+# something on first run. Add your real sites from the web page (they're saved in
+# the database) — you don't need to edit this file.
 #
-# notify_emails: who gets an email when THIS monitor goes down / recovers.
-# Add as many addresses as you like — no accounts needed on their end. Requires
-# the evaluator to have SMTP configured (SMTP_HOST / SMTP_USER / SMTP_PASS).
+# notify_emails: who gets an email when a monitor goes down / recovers. Needs
+# SMTP configured on the evaluator (SMTP_HOST / SMTP_USER / SMTP_PASS).
 monitors:
-  - name: "Example (always up)"
+  - name: "Example"
     url: "https://example.com"
     interval_seconds: 30
-    notify_emails:
-      - "you@example.com"
-
-  - name: "Local target (kill me to test)"
-    url: "http://localhost:8080"
-    interval_seconds: 5
-    expected_status: 200
-    notify_emails:
-      - "you@example.com"
-      - "teammate@example.com"
+    # notify_emails:
+    #   - "you@example.com"
