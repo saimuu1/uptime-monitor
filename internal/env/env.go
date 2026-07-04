@@ -43,6 +43,11 @@ func WebAddr() string {
 	return orDefault("WEB_ADDR", ":8090")
 }
 
+// MetricsAddr is the listen address for a service's /metrics endpoint.
+func MetricsAddr() string {
+	return orDefault("METRICS_ADDR", ":2112")
+}
+
 func orDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

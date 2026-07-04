@@ -23,6 +23,7 @@ import (
 	"github.com/saimuu1/uptime-monitor/internal/env"
 	"github.com/saimuu1/uptime-monitor/internal/evaluate"
 	"github.com/saimuu1/uptime-monitor/internal/message"
+	"github.com/saimuu1/uptime-monitor/internal/metrics"
 	"github.com/saimuu1/uptime-monitor/internal/store"
 )
 
@@ -103,6 +104,8 @@ func main() {
 	log.Printf("evaluator up, seeded %d monitor(s) (freshness=%s stability=%s)",
 		len(monitors), e.cfg.Freshness, e.cfg.Stability)
 
+	go metrics.Serve(ctx, env.MetricsAddr())
+
 	// A slow tick re-evaluates every monitor so a pending change still commits
 	// once its stability window elapses, even between results.
 	go e.tickLoop(ctx)
@@ -159,6 +162,7 @@ func (e *evaluator) handleResult(ctx context.Context, data []byte) {
 		en.downCause = causeOf(r)
 	}
 
+	metrics.ResultsProcessed.Inc()
 	en.engine.Observe(r.Region, evaluate.Sample{Up: r.Up, At: r.CheckedAt})
 	e.commit(ctx, en, en.engine.Evaluate(time.Now()))
 }
@@ -172,6 +176,8 @@ func (e *evaluator) commit(ctx context.Context, en *entry, ev evaluate.Event) {
 			log.Printf("[%s] open incident: %v", en.name, err)
 		}
 		log.Printf("MONITOR DOWN  [%s] %s", en.name, en.downCause)
+		metrics.IncidentsOpened.Inc()
+		metrics.AlertsSent.WithLabelValues("down").Inc()
 		e.notify(ctx, alert.Event{Monitor: en.name, Kind: alert.Down,
 			Region: en.lastRegion, Cause: en.downCause, At: time.Now()})
 	case evaluate.Recovered:
@@ -179,9 +185,16 @@ func (e *evaluator) commit(ctx context.Context, en *entry, ev evaluate.Event) {
 			log.Printf("[%s] resolve incident: %v", en.name, err)
 		}
 		log.Printf("MONITOR RECOVERED  [%s] (%dms)", en.name, en.lastMs)
+		metrics.AlertsSent.WithLabelValues("recovered").Inc()
 		e.notify(ctx, alert.Event{Monitor: en.name, Kind: alert.Recovered,
 			Region: en.lastRegion, At: time.Now()})
 	}
+	// Keep the per-monitor up/down gauge fresh on every evaluation.
+	up := 0.0
+	if en.engine.Up() {
+		up = 1.0
+	}
+	metrics.MonitorUp.WithLabelValues(en.name).Set(up)
 }
 
 func (e *evaluator) notify(ctx context.Context, ev alert.Event) {

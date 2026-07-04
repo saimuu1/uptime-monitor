@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 10s
+
+scrape_configs:
+  - job_name: uptime
+    static_configs:
+      - targets:
+          - scheduler:2112
+          - checker_east:2112
+          - checker_west:2112
+          - evaluator:2112
+          - web:8090

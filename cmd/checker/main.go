@@ -18,6 +18,7 @@ import (
 	"github.com/saimuu1/uptime-monitor/internal/check"
 	"github.com/saimuu1/uptime-monitor/internal/env"
 	"github.com/saimuu1/uptime-monitor/internal/message"
+	"github.com/saimuu1/uptime-monitor/internal/metrics"
 )
 
 func main() {
@@ -41,6 +42,8 @@ func main() {
 		log.Fatalf("subscribe: %v", err)
 	}
 	defer sub.Unsubscribe()
+
+	go metrics.Serve(ctx, env.MetricsAddr())
 
 	log.Printf("checker up (region=%s), waiting for jobs", region)
 	<-ctx.Done()
@@ -84,9 +87,11 @@ func handleJob(ctx context.Context, nc *nats.Conn, region string, data []byte) {
 		return
 	}
 
-	state := "up"
+	outcome := "up"
 	if !res.Up {
-		state = "DOWN"
+		outcome = "down"
 	}
-	log.Printf("checked [%s] -> %s (%dms)", job.Name, state, res.LatencyMs)
+	metrics.ChecksTotal.WithLabelValues(region, outcome).Inc()
+	metrics.CheckLatency.WithLabelValues(region).Observe(float64(res.LatencyMs))
+	log.Printf("checked [%s] -> %s (%dms)", job.Name, outcome, res.LatencyMs)
 }

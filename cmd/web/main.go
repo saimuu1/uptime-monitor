@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/saimuu1/uptime-monitor/internal/env"
+	"github.com/saimuu1/uptime-monitor/internal/metrics"
 	"github.com/saimuu1/uptime-monitor/internal/store"
 	"github.com/saimuu1/uptime-monitor/web"
 )
@@ -41,6 +42,7 @@ func main() {
 	tmpl := template.Must(template.ParseFS(web.Templates, "templates/status.html"))
 
 	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", metrics.Handler())
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "ok")
 	})
