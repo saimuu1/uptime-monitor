@@ -52,6 +52,10 @@ func SMTPPass() string { return os.Getenv("SMTP_PASS") }
 // SMTPFrom is the From address; defaults to the SMTP username.
 func SMTPFrom() string { return orDefault("SMTP_FROM", os.Getenv("SMTP_USER")) }
 
+// AlertEmailTo is the default recipient for monitors with no explicit emails.
+// Defaults to the sender, so "put your Gmail in and get alerted" just works.
+func AlertEmailTo() string { return orDefault("ALERT_EMAIL_TO", SMTPFrom()) }
+
 // WebAddr is the listen address for the status page.
 func WebAddr() string {
 	return orDefault("WEB_ADDR", ":8090")

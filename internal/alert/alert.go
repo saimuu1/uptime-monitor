@@ -45,6 +45,20 @@ func (e Event) Message() string {
 	return fmt.Sprintf("🟢 RECOVERED — %s (region %s)", e.Monitor, e.Region)
 }
 
+// Recipients returns the monitor's own recipient list, or the fallback address
+// (e.g. the operator's own inbox) when the monitor has none. An empty fallback
+// means "no recipients". This is what lets a solo user set one email in config
+// and get alerted about every site without listing it per-monitor.
+func Recipients(monitorEmails []string, fallback string) []string {
+	if len(monitorEmails) > 0 {
+		return monitorEmails
+	}
+	if fallback != "" {
+		return []string{fallback}
+	}
+	return nil
+}
+
 // Notifier delivers an event somewhere.
 type Notifier interface {
 	Send(ctx context.Context, e Event) error

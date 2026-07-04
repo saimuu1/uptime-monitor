@@ -134,11 +134,11 @@ cp deploy/.env.example deploy/.env
 docker compose -f deploy/docker-compose.yml up --build   # auto-loads deploy/.env
 ```
 
-That configures the **sender** (one account for the whole system). **Recipients
-are per-site:** type an email in the "Add a website" form on the page — anyone
-gets alerted just by being on a monitor, no accounts, no chat apps. Multiple
-recipients: comma-separate them, or list them under a monitor's `notify_emails`
-in a config file.
+That configures the **sender**, and by default **every site alerts you** (alerts
+go to `SMTP_FROM` when a monitor lists no one). So just filling in `deploy/.env`
+is enough to start getting emails. To also notify **other people** about a
+specific site, type their address in the "Add a website" form (comma-separate for
+several); to change the default inbox, set `ALERT_EMAIL_TO`.
 
 On a committed DOWN/RECOVERED the evaluator looks up that monitor's recipients
 (fresh from the DB) and emails them. Email and webhook can both be on at once;
