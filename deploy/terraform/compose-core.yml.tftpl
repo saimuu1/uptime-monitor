@@ -48,6 +48,11 @@ services:
       DATABASE_URL: postgres://uptime:uptime@db:5432/uptime?sslmode=disable
       NATS_URL: nats://nats:4222
       ALERT_WEBHOOK_URL: "${alert_webhook_url}"
+      SMTP_HOST: "${smtp.host}"
+      SMTP_PORT: "${smtp.port}"
+      SMTP_USER: "${smtp.user}"
+      SMTP_PASS: "${smtp.pass}"
+      SMTP_FROM: "${smtp.from}"
     depends_on:
       migrate:
         condition: service_completed_successfully

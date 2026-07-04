@@ -58,6 +58,25 @@ variable "alert_webhook_url" {
   sensitive   = true
 }
 
+variable "smtp" {
+  description = "SMTP settings for email alerts. Leave host empty to disable email."
+  type = object({
+    host = string
+    port = string
+    user = string
+    pass = string
+    from = string
+  })
+  default = {
+    host = ""
+    port = "587"
+    user = ""
+    pass = ""
+    from = ""
+  }
+  sensitive = true
+}
+
 variable "allowed_web_cidrs" {
   description = "Who may reach the status page (port 8090)."
   type        = list(string)

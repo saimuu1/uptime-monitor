@@ -107,6 +107,35 @@ docker compose -f deploy/docker-compose.yml up db nats    # just infra (for host
 Status page: http://localhost:8090. Set `ALERT_WEBHOOK_URL` in your shell to wire
 alerts. This mirrors exactly what gets deployed to the cloud.
 
+### Email alerts (per-monitor recipients)
+
+Anyone gets notified just by adding their address to a monitor — no accounts, no
+chat apps. In `config.yaml`:
+
+```yaml
+monitors:
+  - name: "My site"
+    url: "https://example.com"
+    notify_emails:
+      - "you@example.com"
+      - "teammate@example.com"
+```
+
+Configure one sending account on the evaluator (Gmail example):
+
+```bash
+export SMTP_HOST=smtp.gmail.com
+export SMTP_PORT=587
+export SMTP_USER=you@gmail.com
+export SMTP_PASS=your-16-char-app-password   # Google account → 2-step verification → App passwords
+export SMTP_FROM=you@gmail.com
+go run ./cmd/evaluator
+```
+
+On a committed DOWN/RECOVERED the evaluator looks up that monitor's recipients
+(fresh from the DB) and emails them. Email and webhook can both be on at once;
+with neither configured, alerts are log-only.
+
 ### Monitor the monitor (Prometheus + Grafana)
 
 Every service exposes `/metrics` (`internal/metrics`). Add the `observability`

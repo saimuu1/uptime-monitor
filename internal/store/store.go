@@ -27,6 +27,7 @@ type Monitor struct {
 	TimeoutMs       int
 	ExpectedStatus  int
 	Enabled         bool
+	NotifyEmails    []string // addresses to alert on this monitor's outages
 }
 
 // New opens a connection pool against the given postgres URL and verifies it
@@ -51,18 +52,19 @@ func (s *Store) Close() { s.pool.Close() }
 // carries the DB-assigned id.
 func (s *Store) UpsertMonitor(ctx context.Context, m Monitor) (Monitor, error) {
 	const q = `
-		INSERT INTO monitors (name, url, method, interval_seconds, timeout_ms, expected_status, enabled)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO monitors (name, url, method, interval_seconds, timeout_ms, expected_status, enabled, notify_emails)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (name) DO UPDATE SET
 			url = EXCLUDED.url,
 			method = EXCLUDED.method,
 			interval_seconds = EXCLUDED.interval_seconds,
 			timeout_ms = EXCLUDED.timeout_ms,
 			expected_status = EXCLUDED.expected_status,
-			enabled = EXCLUDED.enabled
+			enabled = EXCLUDED.enabled,
+			notify_emails = EXCLUDED.notify_emails
 		RETURNING id`
 	err := s.pool.QueryRow(ctx, q,
-		m.Name, m.URL, m.Method, m.IntervalSeconds, m.TimeoutMs, m.ExpectedStatus, m.Enabled,
+		m.Name, m.URL, m.Method, m.IntervalSeconds, m.TimeoutMs, m.ExpectedStatus, m.Enabled, m.NotifyEmails,
 	).Scan(&m.ID)
 	if err != nil {
 		return Monitor{}, fmt.Errorf("upsert monitor %q: %w", m.Name, err)
@@ -73,7 +75,7 @@ func (s *Store) UpsertMonitor(ctx context.Context, m Monitor) (Monitor, error) {
 // EnabledMonitors returns every enabled monitor.
 func (s *Store) EnabledMonitors(ctx context.Context) ([]Monitor, error) {
 	const q = `
-		SELECT id, name, url, method, interval_seconds, timeout_ms, expected_status, enabled
+		SELECT id, name, url, method, interval_seconds, timeout_ms, expected_status, enabled, notify_emails
 		FROM monitors WHERE enabled = TRUE ORDER BY id`
 	rows, err := s.pool.Query(ctx, q)
 	if err != nil {
@@ -85,12 +87,23 @@ func (s *Store) EnabledMonitors(ctx context.Context) ([]Monitor, error) {
 	for rows.Next() {
 		var m Monitor
 		if err := rows.Scan(&m.ID, &m.Name, &m.URL, &m.Method,
-			&m.IntervalSeconds, &m.TimeoutMs, &m.ExpectedStatus, &m.Enabled); err != nil {
+			&m.IntervalSeconds, &m.TimeoutMs, &m.ExpectedStatus, &m.Enabled, &m.NotifyEmails); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// NotifyEmails returns the current recipient list for a monitor. Looked up at
+// alert time so it's always fresh, regardless of process start order.
+func (s *Store) NotifyEmails(ctx context.Context, monitorID int64) ([]string, error) {
+	const q = `SELECT notify_emails FROM monitors WHERE id = $1`
+	var emails []string
+	if err := s.pool.QueryRow(ctx, q, monitorID).Scan(&emails); err != nil {
+		return nil, fmt.Errorf("notify emails: %w", err)
+	}
+	return emails, nil
 }
 
 // InsertCheck records one check result in the time-series hypertable at the

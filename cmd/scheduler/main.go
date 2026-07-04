@@ -14,6 +14,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
+	"github.com/saimuu1/uptime-monitor/internal/config"
 	"github.com/saimuu1/uptime-monitor/internal/env"
 	"github.com/saimuu1/uptime-monitor/internal/message"
 	"github.com/saimuu1/uptime-monitor/internal/metrics"
@@ -35,6 +36,18 @@ func main() {
 		log.Fatalf("nats: %v", err)
 	}
 	defer nc.Drain()
+
+	// Seed monitors from config (source of truth on start), then read them back.
+	// A missing config is tolerated so you can also run from what's in the DB.
+	if cfg, err := config.Load("config.yaml"); err != nil {
+		log.Printf("config: %v (using monitors already in the DB)", err)
+	} else {
+		for _, m := range cfg.StoreMonitors() {
+			if _, err := st.UpsertMonitor(ctx, m); err != nil {
+				log.Fatalf("seed monitor %q: %v", m.Name, err)
+			}
+		}
+	}
 
 	monitors, err := st.EnabledMonitors(ctx)
 	if err != nil {

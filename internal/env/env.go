@@ -33,10 +33,19 @@ func ConsensusStability() time.Duration {
 	return orDuration("CONSENSUS_STABILITY", 5*time.Second)
 }
 
-// AlertWebhookURL is the Discord/Slack incoming webhook; empty disables alerts.
+// AlertWebhookURL is the Discord/Slack incoming webhook; empty disables it.
 func AlertWebhookURL() string {
 	return os.Getenv("ALERT_WEBHOOK_URL")
 }
+
+// SMTP settings for email alerts. Email is enabled when host + user are set.
+func SMTPHost() string { return os.Getenv("SMTP_HOST") }
+func SMTPPort() string { return orDefault("SMTP_PORT", "587") }
+func SMTPUser() string { return os.Getenv("SMTP_USER") }
+func SMTPPass() string { return os.Getenv("SMTP_PASS") }
+
+// SMTPFrom is the From address; defaults to the SMTP username.
+func SMTPFrom() string { return orDefault("SMTP_FROM", os.Getenv("SMTP_USER")) }
 
 // WebAddr is the listen address for the status page.
 func WebAddr() string {

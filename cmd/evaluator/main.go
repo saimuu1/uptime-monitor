@@ -38,11 +38,11 @@ type entry struct {
 }
 
 type evaluator struct {
-	st       *store.Store
-	notifier alert.Notifier
-	cfg      evaluate.Config
-	mu       sync.Mutex
-	monitors map[int64]*entry
+	st        *store.Store
+	notifiers []alert.Notifier
+	cfg       evaluate.Config
+	mu        sync.Mutex
+	monitors  map[int64]*entry
 }
 
 func main() {
@@ -55,19 +55,25 @@ func main() {
 	}
 	defer st.Close()
 
-	var notifier alert.Notifier = alert.Noop{}
+	var notifiers []alert.Notifier
 	if url := env.AlertWebhookURL(); url != "" {
-		notifier = alert.NewWebhook(url)
+		notifiers = append(notifiers, alert.NewWebhook(url))
 		log.Print("alerts: webhook enabled")
-	} else {
-		log.Print("alerts: no ALERT_WEBHOOK_URL set, logging only")
+	}
+	if env.SMTPHost() != "" && env.SMTPUser() != "" {
+		notifiers = append(notifiers, alert.NewEmail(
+			env.SMTPHost(), env.SMTPPort(), env.SMTPUser(), env.SMTPPass(), env.SMTPFrom()))
+		log.Print("alerts: email enabled")
+	}
+	if len(notifiers) == 0 {
+		log.Print("alerts: none configured, logging only")
 	}
 
 	e := &evaluator{
-		st:       st,
-		notifier: notifier,
-		cfg:      evaluate.Config{Freshness: env.ConsensusFreshness(), Stability: env.ConsensusStability()},
-		monitors: make(map[int64]*entry),
+		st:        st,
+		notifiers: notifiers,
+		cfg:       evaluate.Config{Freshness: env.ConsensusFreshness(), Stability: env.ConsensusStability()},
+		monitors:  make(map[int64]*entry),
 	}
 
 	// Seed engines from the DB so a restart mid-outage doesn't reopen incidents.
@@ -179,7 +185,7 @@ func (e *evaluator) commit(ctx context.Context, en *entry, ev evaluate.Event) {
 		metrics.IncidentsOpened.Inc()
 		metrics.AlertsSent.WithLabelValues("down").Inc()
 		e.notify(ctx, alert.Event{Monitor: en.name, Kind: alert.Down,
-			Region: en.lastRegion, Cause: en.downCause, At: time.Now()})
+			Region: en.lastRegion, Cause: en.downCause, At: time.Now(), To: e.recipients(ctx, en.id)})
 	case evaluate.Recovered:
 		if err := e.st.ResolveIncident(ctx, en.id); err != nil {
 			log.Printf("[%s] resolve incident: %v", en.name, err)
@@ -187,7 +193,7 @@ func (e *evaluator) commit(ctx context.Context, en *entry, ev evaluate.Event) {
 		log.Printf("MONITOR RECOVERED  [%s] (%dms)", en.name, en.lastMs)
 		metrics.AlertsSent.WithLabelValues("recovered").Inc()
 		e.notify(ctx, alert.Event{Monitor: en.name, Kind: alert.Recovered,
-			Region: en.lastRegion, At: time.Now()})
+			Region: en.lastRegion, At: time.Now(), To: e.recipients(ctx, en.id)})
 	}
 	// Keep the per-monitor up/down gauge fresh on every evaluation.
 	up := 0.0
@@ -197,9 +203,20 @@ func (e *evaluator) commit(ctx context.Context, en *entry, ev evaluate.Event) {
 	metrics.MonitorUp.WithLabelValues(en.name).Set(up)
 }
 
+// recipients fetches a monitor's alert emails at send time (always fresh).
+func (e *evaluator) recipients(ctx context.Context, monitorID int64) []string {
+	to, err := e.st.NotifyEmails(ctx, monitorID)
+	if err != nil {
+		log.Printf("recipients for monitor %d: %v", monitorID, err)
+	}
+	return to
+}
+
 func (e *evaluator) notify(ctx context.Context, ev alert.Event) {
-	if err := e.notifier.Send(ctx, ev); err != nil {
-		log.Printf("[%s] alert: %v", ev.Monitor, err)
+	for _, n := range e.notifiers {
+		if err := n.Send(ctx, ev); err != nil {
+			log.Printf("[%s] alert: %v", ev.Monitor, err)
+		}
 	}
 }
 
