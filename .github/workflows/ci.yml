@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Verify formatting
+        run: |
+          fmt=$(gofmt -l .)
+          if [ -n "$fmt" ]; then echo "unformatted files:"; echo "$fmt"; exit 1; fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      matrix:
+        service: [scheduler, checker, evaluator, web, migrate]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.service }} image
+        run: |
+          docker build -f deploy/Dockerfile \
+            --build-arg SERVICE=${{ matrix.service }} \
+            -t uptime-${{ matrix.service }}:ci .
