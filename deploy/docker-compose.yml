@@ -59,7 +59,9 @@ services:
     build:
       <<: *build-ctx
       args: { SERVICE: scheduler }
-    environment: *app-env
+    environment:
+      <<: *app-env
+      CONFIG_PATH: /config.yaml
     volumes:
       - ../config.yaml:/config.yaml:ro # the monitor list to seed
     depends_on:

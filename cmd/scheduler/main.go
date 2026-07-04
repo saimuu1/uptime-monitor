@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"log"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -39,7 +38,7 @@ func main() {
 
 	// Seed monitors from config (source of truth on start), then read them back.
 	// A missing config is tolerated so you can also run from what's in the DB.
-	if cfg, err := config.Load("config.yaml"); err != nil {
+	if cfg, err := config.Load(env.ConfigPath()); err != nil {
 		log.Printf("config: %v (using monitors already in the DB)", err)
 	} else {
 		for _, m := range cfg.StoreMonitors() {
@@ -49,28 +48,79 @@ func main() {
 		}
 	}
 
-	monitors, err := st.EnabledMonitors(ctx)
-	if err != nil {
-		log.Fatalf("load monitors: %v", err)
-	}
-	if len(monitors) == 0 {
-		log.Fatal("no enabled monitors")
-	}
-	log.Printf("scheduling %d monitor(s)", len(monitors))
-
 	go metrics.Serve(ctx, env.MetricsAddr())
 
-	// One ticker per monitor, each publishing a job on its own interval.
-	var wg sync.WaitGroup
-	for _, m := range monitors {
-		wg.Add(1)
-		go func(m store.Monitor) {
-			defer wg.Done()
-			publishLoop(ctx, nc, m)
-		}(m)
-	}
-	wg.Wait()
+	// Reconcile the monitor list on a timer so sites added/removed via the web
+	// form (or config) start/stop being watched without a restart.
+	log.Printf("scheduler up; reconciling every %s", reconcileInterval)
+	reconcile(ctx, st, nc)
 	log.Print("scheduler shutdown complete")
+}
+
+const reconcileInterval = 15 * time.Second
+
+// active is one running per-monitor publish loop.
+type active struct {
+	cancel  context.CancelFunc
+	monitor store.Monitor
+}
+
+// changed reports whether anything the publish loop bakes into its job changed.
+func (a active) changed(m store.Monitor) bool {
+	o := a.monitor
+	return o.URL != m.URL || o.Method != m.Method || o.Name != m.Name ||
+		o.IntervalSeconds != m.IntervalSeconds || o.TimeoutMs != m.TimeoutMs ||
+		o.ExpectedStatus != m.ExpectedStatus
+}
+
+// reconcile loops until ctx is done, keeping a publish loop running per enabled
+// monitor: it starts loops for new monitors, restarts ones whose config
+// changed, and stops loops for monitors that were removed or disabled.
+func reconcile(ctx context.Context, st *store.Store, nc *nats.Conn) {
+	running := map[int64]active{}
+	start := func(m store.Monitor) {
+		loopCtx, cancel := context.WithCancel(ctx)
+		running[m.ID] = active{cancel: cancel, monitor: m}
+		go publishLoop(loopCtx, nc, m)
+	}
+
+	syncOnce := func() {
+		monitors, err := st.EnabledMonitors(ctx)
+		if err != nil {
+			log.Printf("reconcile: %v", err)
+			return
+		}
+		seen := make(map[int64]bool, len(monitors))
+		for _, m := range monitors {
+			seen[m.ID] = true
+			if a, ok := running[m.ID]; !ok {
+				log.Printf("now watching [%s] %s", m.Name, m.URL)
+				start(m)
+			} else if a.changed(m) {
+				a.cancel()
+				start(m)
+			}
+		}
+		for id, a := range running {
+			if !seen[id] {
+				log.Printf("stopped watching [%s]", a.monitor.Name)
+				a.cancel()
+				delete(running, id)
+			}
+		}
+	}
+
+	ticker := time.NewTicker(reconcileInterval)
+	defer ticker.Stop()
+	syncOnce() // reconcile immediately, then on each tick
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			syncOnce()
+		}
+	}
 }
 
 func publishLoop(ctx context.Context, nc *nats.Conn, m store.Monitor) {

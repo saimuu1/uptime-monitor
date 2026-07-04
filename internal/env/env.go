@@ -23,6 +23,11 @@ func Region() string {
 	return orDefault("REGION", "local")
 }
 
+// ConfigPath is where the monitor list YAML lives (containers mount it elsewhere).
+func ConfigPath() string {
+	return orDefault("CONFIG_PATH", "config.yaml")
+}
+
 // ConsensusFreshness: ignore a region's sample once older than this (v3).
 func ConsensusFreshness() time.Duration {
 	return orDuration("CONSENSUS_FRESHNESS", 30*time.Second)

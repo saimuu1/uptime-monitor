@@ -9,6 +9,8 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/saimuu1/uptime-monitor/internal/env"
@@ -18,6 +20,7 @@ import (
 )
 
 type row struct {
+	ID        int64
 	Name      string
 	URL       string
 	Down      bool
@@ -27,9 +30,10 @@ type row struct {
 }
 
 type page struct {
-	Rows    []row
-	UpCount int
-	Updated string
+	Rows      []row
+	UpCount   int
+	DownCount int
+	Updated   string
 }
 
 func main() {
@@ -57,6 +61,56 @@ func main() {
 		}
 	})
 
+	// Add a site: URL required; name/interval/email optional. Upserts to the DB;
+	// the scheduler picks it up on its next reconcile (within ~15s).
+	mux.HandleFunc("POST /monitors", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		url := normalizeURL(strings.TrimSpace(r.FormValue("url")))
+		if url == "" {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		name := strings.TrimSpace(r.FormValue("name"))
+		if name == "" {
+			name = url
+		}
+		interval := 30
+		if v, err := strconv.Atoi(r.FormValue("interval_seconds")); err == nil && v > 0 {
+			interval = v
+		}
+		if _, err := st.UpsertMonitor(r.Context(), store.Monitor{
+			Name:            name,
+			URL:             url,
+			Method:          "GET",
+			IntervalSeconds: interval,
+			TimeoutMs:       5000,
+			ExpectedStatus:  200,
+			Enabled:         true,
+			NotifyEmails:    splitEmails(r.FormValue("email")),
+		}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+
+	// Remove a site.
+	mux.HandleFunc("POST /monitors/delete", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
+		if err != nil {
+			http.Error(w, "bad id", http.StatusBadRequest)
+			return
+		}
+		if err := st.DeleteMonitor(r.Context(), id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+
 	addr := env.WebAddr()
 	log.Printf("status page listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
@@ -68,6 +122,7 @@ func buildPage(statuses []store.Status) page {
 	p := page{Updated: time.Now().Format("15:04:05 MST")}
 	for _, s := range statuses {
 		r := row{
+			ID:        s.ID,
 			Name:      s.Name,
 			URL:       s.URL,
 			Down:      s.Down,
@@ -77,6 +132,7 @@ func buildPage(statuses []store.Status) page {
 		switch {
 		case s.Down:
 			r.DotClass = "down"
+			p.DownCount++
 		case s.Checks24h == 0:
 			r.DotClass = "nodata"
 			r.UptimePct = "no data"
@@ -90,6 +146,28 @@ func buildPage(statuses []store.Status) page {
 		p.Rows = append(p.Rows, r)
 	}
 	return p
+}
+
+// normalizeURL adds https:// if the user didn't type a scheme.
+func normalizeURL(u string) string {
+	if u == "" {
+		return ""
+	}
+	if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+		return "https://" + u
+	}
+	return u
+}
+
+// splitEmails turns a comma/space-separated string into a clean list.
+func splitEmails(s string) []string {
+	var out []string
+	for _, part := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' }) {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func humanizeAgo(d time.Duration) string {

@@ -4,42 +4,144 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="refresh" content="10">
-  <title>Status</title>
+  <title>Status · Uptime Monitor</title>
   <style>
-    :root { color-scheme: light dark; }
-    body { font: 15px/1.5 system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
-    h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
-    .sub { color: #888; font-size: 0.85rem; margin-bottom: 1.5rem; }
-    .card { display: flex; align-items: center; gap: 1rem; padding: 0.9rem 1rem;
-            border: 1px solid #8883; border-radius: 10px; margin-bottom: 0.6rem; }
-    .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
-    .up { background: #22c55e; } .down { background: #ef4444; } .nodata { background: #9ca3af; }
-    .name { font-weight: 600; }
-    .url { color: #888; font-size: 0.8rem; word-break: break-all; }
-    .meta { margin-left: auto; text-align: right; font-size: 0.85rem; white-space: nowrap; }
-    .pct { font-weight: 600; }
-    .status-down { color: #ef4444; font-weight: 600; }
-    .status-up { color: #22c55e; font-weight: 600; }
+    :root {
+      --bg: #f6f7f9; --card: #ffffff; --text: #14171a; --muted: #6b7280;
+      --border: #e6e8eb; --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.05);
+      --up: #17915a; --up-bg: #e7f6ee; --down: #d63b3b; --down-bg: #fde9e9;
+      --accent: #2f6bff; --radius: 14px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0e1013; --card: #16191e; --text: #e8eaed; --muted: #9aa2ad;
+        --border: #262b31; --shadow: none;
+        --up: #3ecf8e; --up-bg: #13291f; --down: #f2686a; --down-bg: #2a1618;
+        --accent: #6c96ff;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 40px 20px 64px; }
+
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 18px; letter-spacing: -.01em; }
+    .brand .logo { width: 26px; height: 26px; border-radius: 8px; background: var(--accent);
+                   display: grid; place-items: center; color: #fff; font-size: 14px; }
+    .updated { color: var(--muted); font-size: 12.5px; }
+
+    .banner { display: flex; align-items: center; gap: 14px; padding: 18px 20px;
+              border-radius: var(--radius); margin-bottom: 26px; border: 1px solid transparent; }
+    .banner .big { font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+    .banner .small { font-size: 13px; opacity: .8; }
+    .banner.ok { background: var(--up-bg); border-color: color-mix(in srgb, var(--up) 22%, transparent); }
+    .banner.ok .big { color: var(--up); }
+    .banner.bad { background: var(--down-bg); border-color: color-mix(in srgb, var(--down) 24%, transparent); }
+    .banner.bad .big { color: var(--down); }
+    .banner.neutral { background: var(--card); border-color: var(--border); }
+    .beat { width: 12px; height: 12px; border-radius: 50%; flex: none; position: relative; }
+    .beat.ok { background: var(--up); } .beat.bad { background: var(--down); } .beat.neutral { background: var(--muted); }
+    .beat.ok::after { content: ""; position: absolute; inset: -5px; border-radius: 50%;
+                      border: 2px solid var(--up); opacity: .4; animation: pulse 2s ease-out infinite; }
+    @keyframes pulse { 0% { transform: scale(.7); opacity: .5; } 100% { transform: scale(1.4); opacity: 0; } }
+
+    .add { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+           box-shadow: var(--shadow); padding: 16px; margin-bottom: 26px; }
+    .add h2 { margin: 0 0 12px; font-size: 13px; font-weight: 600; color: var(--muted);
+              text-transform: uppercase; letter-spacing: .04em; }
+    .add .fields { display: flex; flex-wrap: wrap; gap: 10px; }
+    .add input { font: inherit; height: 40px; padding: 0 12px; border: 1px solid var(--border);
+                 border-radius: 10px; background: var(--bg); color: var(--text); outline: none; }
+    .add input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+    .add input[name=url] { flex: 3 1 240px; }
+    .add input[name=email] { flex: 2 1 180px; }
+    .add input[name=interval_seconds] { width: 96px; }
+    .add button { height: 40px; padding: 0 18px; border: none; border-radius: 10px; cursor: pointer;
+                  background: var(--accent); color: #fff; font: inherit; font-weight: 600; }
+    .add button:hover { filter: brightness(1.05); }
+
+    .list { display: flex; flex-direction: column; gap: 10px; }
+    .monitor { display: flex; align-items: center; gap: 14px; background: var(--card);
+               border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+               padding: 15px 18px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+    .dot.up { background: var(--up); } .dot.down { background: var(--down); } .dot.nodata { background: var(--muted); }
+    .mono-name { font-weight: 600; letter-spacing: -.01em; }
+    .mono-url { color: var(--muted); font-size: 12.5px; word-break: break-all; margin-top: 1px; }
+    .right { margin-left: auto; display: flex; align-items: center; gap: 16px; text-align: right; }
+    .pill { font-size: 12px; font-weight: 650; padding: 4px 10px; border-radius: 999px; }
+    .pill.up { color: var(--up); background: var(--up-bg); } .pill.down { color: var(--down); background: var(--down-bg); }
+    .stat { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+    .stat b { color: var(--text); font-weight: 600; }
+    .rmform { display: inline; margin: 0; }
+    .rm { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 15px;
+          padding: 4px 6px; border-radius: 8px; line-height: 1; }
+    .rm:hover { color: var(--down); background: var(--down-bg); }
+
+    .empty { text-align: center; color: var(--muted); padding: 40px 0; }
+    footer { margin-top: 28px; text-align: center; color: var(--muted); font-size: 12px; }
   </style>
 </head>
 <body>
-  <h1>Service status</h1>
-  <div class="sub">{{ .UpCount }}/{{ len .Rows }} operational · updated {{ .Updated }} · auto-refresh 10s</div>
+  <div class="wrap">
+    <header>
+      <div class="brand"><span class="logo">◒</span> Uptime Monitor</div>
+      <div class="updated">Updated {{ .Updated }} · auto-refreshes every 10s</div>
+    </header>
 
-  {{ range .Rows }}
-  <div class="card">
-    <span class="dot {{ .DotClass }}"></span>
-    <div>
-      <div class="name">{{ .Name }}</div>
-      <div class="url">{{ .URL }}</div>
+    {{ if eq (len .Rows) 0 }}
+      <div class="banner neutral"><span class="beat neutral"></span>
+        <div><div class="big">No monitors yet</div><div class="small">Add your first website below.</div></div>
+      </div>
+    {{ else if .DownCount }}
+      <div class="banner bad"><span class="beat bad"></span>
+        <div><div class="big">{{ .DownCount }} of {{ len .Rows }} down</div>
+        <div class="small">{{ .UpCount }} operational</div></div>
+      </div>
+    {{ else }}
+      <div class="banner ok"><span class="beat ok"></span>
+        <div><div class="big">All systems operational</div>
+        <div class="small">{{ .UpCount }} of {{ len .Rows }} monitors up</div></div>
+      </div>
+    {{ end }}
+
+    <form class="add" method="POST" action="/monitors">
+      <h2>Add a website</h2>
+      <div class="fields">
+        <input name="url" type="text" placeholder="https://your-site.com" required>
+        <input name="email" type="text" placeholder="you@email.com  (comma-separated)">
+        <input name="interval_seconds" type="number" placeholder="every 30s" min="5" title="seconds between checks">
+        <button type="submit">Add</button>
+      </div>
+    </form>
+
+    <div class="list">
+      {{ range .Rows }}
+      <div class="monitor">
+        <span class="dot {{ .DotClass }}"></span>
+        <div>
+          <div class="mono-name">{{ .Name }}</div>
+          <div class="mono-url">{{ .URL }}</div>
+        </div>
+        <div class="right">
+          {{ if .Down }}<span class="pill down">Down</span>{{ else }}<span class="pill up">Operational</span>{{ end }}
+          <span class="stat"><b>{{ .UptimePct }}</b> · {{ .LastCheck }}</span>
+          <form class="rmform" method="POST" action="/monitors/delete" onsubmit="return confirm('Remove {{ .Name }}?')">
+            <input type="hidden" name="id" value="{{ .ID }}">
+            <button class="rm" type="submit" title="Remove">✕</button>
+          </form>
+        </div>
+      </div>
+      {{ else }}
+      <div class="empty">No sites yet — add one above.</div>
+      {{ end }}
     </div>
-    <div class="meta">
-      {{ if .Down }}<span class="status-down">DOWN</span>{{ else }}<span class="status-up">Operational</span>{{ end }}<br>
-      <span class="pct">{{ .UptimePct }}</span> · {{ .LastCheck }}
-    </div>
+
+    <footer>Checked from multiple regions · alerts on confirmed outages</footer>
   </div>
-  {{ else }}
-  <p>No monitors configured.</p>
-  {{ end }}
 </body>
 </html>
