@@ -15,6 +15,7 @@ import (
 
 	"github.com/saimuu1/uptime-monitor/internal/check"
 	"github.com/saimuu1/uptime-monitor/internal/config"
+	"github.com/saimuu1/uptime-monitor/internal/env"
 	"github.com/saimuu1/uptime-monitor/internal/evaluate"
 	"github.com/saimuu1/uptime-monitor/internal/store"
 )
@@ -39,7 +40,7 @@ func main() {
 	defer st.Close()
 
 	// Seed the monitors table from config, then read back what's enabled.
-	cfg, err := config.Load("config.yaml")
+	cfg, err := config.Load(env.ConfigPath())
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}

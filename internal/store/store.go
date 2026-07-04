@@ -95,6 +95,27 @@ func (s *Store) EnabledMonitors(ctx context.Context) ([]Monitor, error) {
 	return out, rows.Err()
 }
 
+// DeleteMonitor removes a monitor and its history. checks has no FK, incidents
+// does, so clear children first, all in one transaction.
+func (s *Store) DeleteMonitor(ctx context.Context, id int64) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	for _, q := range []string{
+		`DELETE FROM checks WHERE monitor_id = $1`,
+		`DELETE FROM incidents WHERE monitor_id = $1`,
+		`DELETE FROM monitors WHERE id = $1`,
+	} {
+		if _, err := tx.Exec(ctx, q, id); err != nil {
+			return fmt.Errorf("delete monitor: %w", err)
+		}
+	}
+	return tx.Commit(ctx)
+}
+
 // NotifyEmails returns the current recipient list for a monitor. Looked up at
 // alert time so it's always fresh, regardless of process start order.
 func (s *Store) NotifyEmails(ctx context.Context, monitorID int64) ([]string, error) {
