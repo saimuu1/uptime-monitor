@@ -1,0 +1,9 @@
+.git
+bin/
+*.log
+config.yaml
+deploy/terraform
+deploy/grafana
+.github
+README.md
+PLAN.md

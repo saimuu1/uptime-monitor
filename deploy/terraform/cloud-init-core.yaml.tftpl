@@ -1,0 +1,15 @@
+#cloud-config
+package_update: true
+packages:
+  - docker.io
+  - docker-compose-v2
+write_files:
+  - path: /opt/uptime/config.yaml
+    encoding: b64
+    content: ${config_b64}
+  - path: /opt/uptime/docker-compose.yml
+    encoding: b64
+    content: ${compose_b64}
+runcmd:
+  - systemctl enable --now docker
+  - cd /opt/uptime && docker compose pull && docker compose up -d

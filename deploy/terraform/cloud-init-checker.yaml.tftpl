@@ -1,0 +1,11 @@
+#cloud-config
+package_update: true
+packages:
+  - docker.io
+runcmd:
+  - systemctl enable --now docker
+  - >
+    docker run -d --restart unless-stopped --name checker
+    -e REGION=${region}
+    -e NATS_URL=nats://${core_ip}:4222
+    ${image_registry}/uptime-checker:${image_tag}

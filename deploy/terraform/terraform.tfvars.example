@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+
+do_token    = "dop_v1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+ssh_key_ids = ["12345678"] # from: doctl compute ssh-key list
+
+core_region     = "nyc1"
+checker_regions = ["nyc1", "lon1", "sgp1"]
+
+image_registry = "ghcr.io/saimuu1"
+image_tag      = "latest"
+
+# alert_webhook_url = "https://discord.com/api/webhooks/..."
+
+config_yaml = <<-EOT
+  monitors:
+    - name: "My site"
+      url: "https://example.com"
+      interval_seconds: 30
+EOT

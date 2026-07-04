@@ -1,8 +1,21 @@
+# Full stack in containers. This mirrors what v4 deploys to the cloud.
+#
+#   docker compose -f deploy/docker-compose.yml up --build      # the whole thing
+#   docker compose -f deploy/docker-compose.yml up db nats      # just infra (host dev)
+#
+# Inside this network, Postgres is reached at db:5432 and NATS at nats:4222.
+# Host ports (5433, 4222, 8090, 8222) are only for tools on your laptop.
+
+x-app-env: &app-env
+  DATABASE_URL: postgres://uptime:uptime@db:5432/uptime?sslmode=disable
+  NATS_URL: nats://nats:4222
+
+x-build: &build-ctx
+  context: ..
+  dockerfile: deploy/Dockerfile
+
 services:
   db:
-    # TimescaleDB is Postgres + the timescaledb extension, so this single
-    # container backs both the relational tables (monitors, incidents) and the
-    # time-series hypertable (checks) in v1.
     image: timescale/timescaledb:latest-pg16
     container_name: uptime-db
     environment:
@@ -10,8 +23,7 @@ services:
       POSTGRES_PASSWORD: uptime
       POSTGRES_DB: uptime
     ports:
-      # Host 5433 to avoid clashing with other local Postgres (e.g. job-queue).
-      - "5433:5432"
+      - "5433:5432" # host 5433 to avoid clashing with other local Postgres
     volumes:
       - uptime-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -20,19 +32,85 @@ services:
       timeout: 5s
       retries: 5
 
-  # v2: message queue that decouples the scheduler from the checkers.
   nats:
     image: nats:2-alpine
     container_name: uptime-nats
-    command: ["-m", "8222"] # enable the monitoring/health endpoint on 8222
+    command: ["-m", "8222"]
     ports:
-      - "4222:4222" # client connections
-      - "8222:8222" # http monitoring
+      - "4222:4222"
+      - "8222:8222"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # One-shot: create/upgrade the schema, then exit. Everything else waits on it.
+  migrate:
+    build:
+      <<: *build-ctx
+      args: { SERVICE: migrate }
+    environment: *app-env
+    depends_on:
+      db: { condition: service_healthy }
+    restart: "no"
+
+  scheduler:
+    build:
+      <<: *build-ctx
+      args: { SERVICE: scheduler }
+    environment: *app-env
+    volumes:
+      - ../config.yaml:/config.yaml:ro # the monitor list to seed
+    depends_on:
+      db: { condition: service_healthy }
+      nats: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  checker_east:
+    build:
+      <<: *build-ctx
+      args: { SERVICE: checker }
+    environment:
+      <<: *app-env
+      REGION: east
+    depends_on:
+      nats: { condition: service_healthy }
+
+  checker_west:
+    build:
+      <<: *build-ctx
+      args: { SERVICE: checker }
+    environment:
+      <<: *app-env
+      REGION: west
+    depends_on:
+      nats: { condition: service_healthy }
+
+  evaluator:
+    build:
+      <<: *build-ctx
+      args: { SERVICE: evaluator }
+    environment:
+      <<: *app-env
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+    depends_on:
+      db: { condition: service_healthy }
+      nats: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  web:
+    build:
+      <<: *build-ctx
+      args: { SERVICE: web }
+    environment:
+      <<: *app-env
+      WEB_ADDR: ":8090"
+    ports:
+      - "8090:8090"
+    depends_on:
+      db: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
 
 volumes:
   uptime-db-data:

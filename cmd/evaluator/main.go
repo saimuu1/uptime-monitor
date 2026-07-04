@@ -28,9 +28,9 @@ import (
 
 // entry is the evaluator's per-monitor bookkeeping around the pure engine.
 type entry struct {
-	id        int64
-	name      string
-	engine    *evaluate.Monitor
+	id         int64
+	name       string
+	engine     *evaluate.Monitor
 	lastRegion string // region of the most recent result (for alert context)
 	lastMs     int    // latency of the most recent result
 	downCause  string // cause from the most recent down result

@@ -4,9 +4,9 @@ A self-hosted service that watches your websites/APIs, records whether they're u
 and how long they take, and detects when they go down or recover.
 
 This repo follows the milestone plan in [`PLAN.md`](PLAN.md). **Current milestone:
-v3 — checkers run in multiple regions; the evaluator only alerts when a majority
-of regions *agree* a monitor is down and the state holds long enough to rule out
-flapping. It sends webhook alerts and serves a status page.**
+v4 — every service ships as a tiny container, the whole system runs from one
+`docker compose up`, CI tests every push, and Terraform can stand the whole thing
+up on DigitalOcean across real regions.**
 
 ## Architecture
 
@@ -93,6 +93,40 @@ Knobs (all optional, with defaults): `REGION` (`local`) tags a checker's results
 Kill one region's checker and monitoring continues with no false alarm; take the
 target down for real and every surviving region agrees → alert + status page flips.
 
+### Run the whole system in containers (v4)
+
+Each service is a ~20MB image built from one multi-stage [`deploy/Dockerfile`](deploy/Dockerfile).
+The full stack — db, NATS, a `migrate` step, scheduler, two regional checkers,
+evaluator, and web — comes up together:
+
+```bash
+docker compose -f deploy/docker-compose.yml up --build   # everything
+docker compose -f deploy/docker-compose.yml up db nats    # just infra (for host dev)
+```
+
+Status page: http://localhost:8090. Set `ALERT_WEBHOOK_URL` in your shell to wire
+alerts. This mirrors exactly what gets deployed to the cloud.
+
+### Deploy to DigitalOcean (v4)
+
+Terraform provisions a core box + one checker droplet per real region. See
+[`deploy/terraform/README.md`](deploy/terraform/README.md). Short version:
+
+```bash
+cd deploy/terraform
+cp terraform.tfvars.example terraform.tfvars   # token, ssh key, regions
+terraform init && terraform plan && terraform apply
+```
+
+⚠️ `apply` creates paid droplets (~$18/mo for three); `terraform destroy` removes
+them. Everything before `apply` is free.
+
+## CI
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `gofmt`, `go vet`, and
+`go test -race` on every push/PR, then builds every service image.
+[`release.yml`](.github/workflows/release.yml) pushes images to GHCR on a `v*` tag.
+
 `config.yaml` is the seed: on start its monitors are upserted (matched by `name`)
 into the DB, which is the source of truth thereafter. `DATABASE_URL` overrides the
 default connection string.
@@ -135,6 +169,7 @@ SELECT name, up, count(*) FROM checks c JOIN monitors m ON m.id=c.monitor_id
 | `cmd/checker` | v2: stateless worker, one per region |
 | `cmd/evaluator` | v2/v3: stores checks, consensus, incidents, alerts |
 | `cmd/web` | v3: status page server |
+| `cmd/migrate` | v4: apply embedded migrations, then exit |
 | `internal/config` | load YAML, upsert monitors |
 | `internal/check` | perform one HTTP check |
 | `internal/store` | database reads/writes (pgx) |
@@ -143,13 +178,17 @@ SELECT name, up, count(*) FROM checks c JOIN monitors m ON m.id=c.monitor_id
 | `internal/message` | NATS subjects + job/result payloads |
 | `internal/env` | shared env-var config with defaults |
 | `web` | embedded status-page template |
-| `migrations` | goose SQL migrations |
-| `deploy` | docker-compose (+ terraform in v4) |
+| `migrations` | goose SQL migrations (embedded for cmd/migrate) |
+| `deploy/Dockerfile` | one multi-stage build, parameterized by service |
+| `deploy/docker-compose.yml` | full stack in containers |
+| `deploy/terraform` | DigitalOcean infrastructure as code |
+| `.github/workflows` | CI (test + build) and image release |
 
-## Next milestones
+## What's left
 
-See `PLAN.md`: v4 dockerizes each binary and deploys via Terraform to
-DigitalOcean across real regions, with CI/CD and Prometheus/Grafana.
+The four core milestones are done. Optional polish from `PLAN.md`: Prometheus +
+Grafana ("monitor the monitor"), and the stretch goals (SSL-expiry checks,
+keyword checks, latency percentiles, maintenance windows, on-call escalation).
 
 ## Stopping
 

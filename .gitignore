@@ -9,5 +9,12 @@ config.yaml
 # Env
 .env
 
+# Terraform: never commit state or secrets (the .lock.hcl SHOULD be committed)
+deploy/terraform/.terraform/
+deploy/terraform/*.tfstate
+deploy/terraform/*.tfstate.*
+deploy/terraform/terraform.tfvars
+deploy/terraform/*.tfplan
+
 # macOS
 .DS_Store
