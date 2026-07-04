@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/smtp"
+	"strings"
 	"time"
 )
 
@@ -27,6 +29,12 @@ type Event struct {
 	Region  string
 	Cause   string
 	At      time.Time
+	To      []string // recipient emails (used by the Email notifier)
+}
+
+// Subject renders the email subject line.
+func (e Event) Subject() string {
+	return fmt.Sprintf("[%s] %s", e.Kind, e.Monitor)
 }
 
 // Message renders the human-readable line sent to the webhook.
@@ -82,4 +90,44 @@ func (w Webhook) Send(ctx context.Context, e Event) error {
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// Email sends alerts over SMTP to each event's recipient list. One sending
+// account (the operator's) delivers to any number of per-monitor recipients —
+// so people are notified just by having their address on a monitor, no
+// per-user accounts or chat apps required.
+type Email struct {
+	Host string
+	Port string
+	User string
+	Pass string
+	From string
+}
+
+// NewEmail builds an Email notifier.
+func NewEmail(host, port, user, pass, from string) Email {
+	return Email{Host: host, Port: port, User: user, Pass: pass, From: from}
+}
+
+// Send emails the event to e's recipients. No recipients = nothing to do.
+func (m Email) Send(_ context.Context, ev Event) error {
+	if len(ev.To) == 0 {
+		return nil
+	}
+	auth := smtp.PlainAuth("", m.User, m.Pass, m.Host)
+	addr := m.Host + ":" + m.Port
+	return smtp.SendMail(addr, auth, m.From, ev.To, buildMessage(m.From, ev))
+}
+
+// buildMessage renders the raw RFC 5322 message (headers + body).
+func buildMessage(from string, ev Event) []byte {
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "From: %s\r\n", from)
+	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(ev.To, ", "))
+	fmt.Fprintf(&b, "Subject: %s\r\n", ev.Subject())
+	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(ev.Message())
+	b.WriteString("\r\n")
+	return b.Bytes()
 }

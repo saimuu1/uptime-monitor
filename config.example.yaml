@@ -1,11 +1,20 @@
 # Copy to config.yaml and edit. On first run these are upserted into the
 # `monitors` table (matched by name); after that the DB is the source of truth.
+#
+# notify_emails: who gets an email when THIS monitor goes down / recovers.
+# Add as many addresses as you like — no accounts needed on their end. Requires
+# the evaluator to have SMTP configured (SMTP_HOST / SMTP_USER / SMTP_PASS).
 monitors:
   - name: "Example (always up)"
     url: "https://example.com"
     interval_seconds: 30
+    notify_emails:
+      - "you@example.com"
 
   - name: "Local target (kill me to test)"
     url: "http://localhost:8080"
     interval_seconds: 5
     expected_status: 200
+    notify_emails:
+      - "you@example.com"
+      - "teammate@example.com"

@@ -13,6 +13,7 @@ resource "digitalocean_droplet" "core" {
       image_registry    = var.image_registry
       image_tag         = var.image_tag
       alert_webhook_url = var.alert_webhook_url
+      smtp              = var.smtp
     }))
     config_b64 = base64encode(var.config_yaml)
   })
