@@ -124,32 +124,26 @@ alerts. This mirrors exactly what gets deployed to the cloud.
 
 ### Email alerts (per-monitor recipients)
 
-Anyone gets notified just by adding their address to a monitor — no accounts, no
-chat apps. In `config.yaml`:
-
-```yaml
-monitors:
-  - name: "My site"
-    url: "https://example.com"
-    notify_emails:
-      - "you@example.com"
-      - "teammate@example.com"
-```
-
-Configure one sending account on the evaluator (Gmail example):
+Email is **opt-in** — sending mail needs your own sending account, so it can't be
+on by default. Turning it on is two steps, and the run command doesn't change:
 
 ```bash
-export SMTP_HOST=smtp.gmail.com
-export SMTP_PORT=587
-export SMTP_USER=you@gmail.com
-export SMTP_PASS=your-16-char-app-password   # Google account → 2-step verification → App passwords
-export SMTP_FROM=you@gmail.com
-go run ./cmd/evaluator
+cp deploy/.env.example deploy/.env
+#   edit deploy/.env with your sending account (Gmail: use a 16-char App
+#   password — Google account → 2-Step Verification → App passwords)
+docker compose -f deploy/docker-compose.yml up --build   # auto-loads deploy/.env
 ```
+
+That configures the **sender** (one account for the whole system). **Recipients
+are per-site:** type an email in the "Add a website" form on the page — anyone
+gets alerted just by being on a monitor, no accounts, no chat apps. Multiple
+recipients: comma-separate them, or list them under a monitor's `notify_emails`
+in a config file.
 
 On a committed DOWN/RECOVERED the evaluator looks up that monitor's recipients
 (fresh from the DB) and emails them. Email and webhook can both be on at once;
-with neither configured, alerts are log-only.
+with neither configured, alerts are log-only. (`deploy/.env` is gitignored, so
+your credentials never get committed.)
 
 ### Monitor the monitor (Prometheus + Grafana)
 
