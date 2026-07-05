@@ -58,12 +58,13 @@ func handleJob(ctx context.Context, nc *nats.Conn, region string, data []byte) {
 	}
 
 	res := check.Do(ctx, check.Monitor{
-		ID:             job.MonitorID,
-		Name:           job.Name,
-		URL:            job.URL,
-		Method:         job.Method,
-		Timeout:        time.Duration(job.TimeoutMs) * time.Millisecond,
-		ExpectedStatus: job.ExpectedStatus,
+		ID:              job.MonitorID,
+		Name:            job.Name,
+		URL:             job.URL,
+		Method:          job.Method,
+		Timeout:         time.Duration(job.TimeoutMs) * time.Millisecond,
+		ExpectedStatus:  job.ExpectedStatus,
+		ExpectedKeyword: job.ExpectedKeyword,
 	})
 
 	result := message.CheckResult{
