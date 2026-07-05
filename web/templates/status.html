@@ -65,9 +65,9 @@
     .add button:hover { filter: brightness(1.05); }
 
     .list { display: flex; flex-direction: column; gap: 10px; }
-    .monitor { display: flex; align-items: center; gap: 14px; background: var(--card);
-               border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
-               padding: 15px 18px; }
+    .monitor { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+               box-shadow: var(--shadow); padding: 15px 18px; }
+    .monitor-top { display: flex; align-items: center; gap: 14px; }
     .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
     .dot.up { background: var(--up); } .dot.down { background: var(--down); } .dot.nodata { background: var(--muted); }
     .mono-name { font-weight: 600; letter-spacing: -.01em; }
@@ -81,6 +81,12 @@
     .rm { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 15px;
           padding: 4px 6px; border-radius: 8px; line-height: 1; }
     .rm:hover { color: var(--down); background: var(--down-bg); }
+    .bars { display: flex; gap: 2px; margin-top: 12px; height: 26px; align-items: stretch; }
+    .bar { flex: 1 1 0; border-radius: 2px; min-width: 3px; }
+    .bar.up { background: var(--up); } .bar.down { background: var(--down); }
+    .bar.partial { background: #e0a92e; } .bar.nodata { background: var(--border); }
+    .bars-legend { display: flex; justify-content: space-between; margin-top: 5px;
+                   font-size: 11px; color: var(--muted); }
 
     .empty { text-align: center; color: var(--muted); padding: 40px 0; }
     footer { margin-top: 28px; text-align: center; color: var(--muted); font-size: 12px; }
@@ -122,19 +128,25 @@
     <div class="list">
       {{ range .Rows }}
       <div class="monitor">
-        <span class="dot {{ .DotClass }}"></span>
-        <div>
-          <div class="mono-name">{{ .Name }}</div>
-          <div class="mono-url">{{ .URL }}</div>
+        <div class="monitor-top">
+          <span class="dot {{ .DotClass }}"></span>
+          <div>
+            <div class="mono-name">{{ .Name }}</div>
+            <div class="mono-url">{{ .URL }}</div>
+          </div>
+          <div class="right">
+            {{ if .Down }}<span class="pill down">Down</span>{{ else }}<span class="pill up">Operational</span>{{ end }}
+            <span class="stat"><b>{{ .UptimePct }}</b> · {{ .LastCheck }}</span>
+            <form class="rmform" method="POST" action="/monitors/delete" onsubmit="return confirm('Remove {{ .Name }}?')">
+              <input type="hidden" name="id" value="{{ .ID }}">
+              <button class="rm" type="submit" title="Remove">✕</button>
+            </form>
+          </div>
         </div>
-        <div class="right">
-          {{ if .Down }}<span class="pill down">Down</span>{{ else }}<span class="pill up">Operational</span>{{ end }}
-          <span class="stat"><b>{{ .UptimePct }}</b> · {{ .LastCheck }}</span>
-          <form class="rmform" method="POST" action="/monitors/delete" onsubmit="return confirm('Remove {{ .Name }}?')">
-            <input type="hidden" name="id" value="{{ .ID }}">
-            <button class="rm" type="submit" title="Remove">✕</button>
-          </form>
-        </div>
+        {{ if .Bars }}
+        <div class="bars">{{ range .Bars }}<span class="bar {{ .Class }}" title="{{ .Title }}"></span>{{ end }}</div>
+        <div class="bars-legend"><span>90 days ago</span><span>today</span></div>
+        {{ end }}
       </div>
       {{ else }}
       <div class="empty">No sites yet — add one above.</div>
