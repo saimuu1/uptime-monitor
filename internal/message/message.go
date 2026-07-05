@@ -18,12 +18,13 @@ const (
 // CheckJob is "please check this monitor now". It carries everything a checker
 // needs so checkers stay stateless and never touch the database.
 type CheckJob struct {
-	MonitorID      int64  `json:"monitor_id"`
-	Name           string `json:"name"`
-	URL            string `json:"url"`
-	Method         string `json:"method"`
-	TimeoutMs      int    `json:"timeout_ms"`
-	ExpectedStatus int    `json:"expected_status"`
+	MonitorID       int64  `json:"monitor_id"`
+	Name            string `json:"name"`
+	URL             string `json:"url"`
+	Method          string `json:"method"`
+	TimeoutMs       int    `json:"timeout_ms"`
+	ExpectedStatus  int    `json:"expected_status"`
+	ExpectedKeyword string `json:"expected_keyword"`
 }
 
 // CheckResult is the outcome of one check, tagged with the region it ran from

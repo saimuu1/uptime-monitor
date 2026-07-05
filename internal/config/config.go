@@ -28,6 +28,7 @@ type MonitorConfig struct {
 	ExpectedStatus  int      `yaml:"expected_status"`
 	Enabled         *bool    `yaml:"enabled"` // pointer so an omitted value defaults to true
 	NotifyEmails    []string `yaml:"notify_emails"`
+	ExpectedKeyword string   `yaml:"expected_keyword"`
 }
 
 // Load reads and parses the YAML file at path.
@@ -67,6 +68,7 @@ func (m MonitorConfig) toStoreMonitor() store.Monitor {
 		ExpectedStatus:  m.ExpectedStatus,
 		Enabled:         true,
 		NotifyEmails:    m.NotifyEmails,
+		ExpectedKeyword: m.ExpectedKeyword,
 	}
 	if sm.Method == "" {
 		sm.Method = "GET"

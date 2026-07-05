@@ -2,6 +2,7 @@ package check
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -59,6 +60,37 @@ func TestDo(t *testing.T) {
 			}
 			if got.StatusCode != tt.wantStatus {
 				t.Errorf("StatusCode = %d, want %d", got.StatusCode, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestKeyword(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "<html><body>Welcome to my store</body></html>")
+	}))
+	defer srv.Close()
+
+	tests := []struct {
+		name    string
+		keyword string
+		wantUp  bool
+	}{
+		{"keyword present", "my store", true},
+		{"keyword absent", "Checkout complete", false},
+		{"no keyword configured", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Do(context.Background(), Monitor{
+				URL:             srv.URL,
+				Method:          "GET",
+				Timeout:         time.Second,
+				ExpectedStatus:  200,
+				ExpectedKeyword: tt.keyword,
+			})
+			if got.Up != tt.wantUp {
+				t.Errorf("Up = %v, want %v (err=%q)", got.Up, tt.wantUp, got.Err)
 			}
 		})
 	}

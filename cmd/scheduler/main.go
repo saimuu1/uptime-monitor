@@ -125,12 +125,13 @@ func reconcile(ctx context.Context, st *store.Store, nc *nats.Conn) {
 
 func publishLoop(ctx context.Context, nc *nats.Conn, m store.Monitor) {
 	job := message.CheckJob{
-		MonitorID:      m.ID,
-		Name:           m.Name,
-		URL:            m.URL,
-		Method:         m.Method,
-		TimeoutMs:      m.TimeoutMs,
-		ExpectedStatus: m.ExpectedStatus,
+		MonitorID:       m.ID,
+		Name:            m.Name,
+		URL:             m.URL,
+		Method:          m.Method,
+		TimeoutMs:       m.TimeoutMs,
+		ExpectedStatus:  m.ExpectedStatus,
+		ExpectedKeyword: m.ExpectedKeyword,
 	}
 	payload, err := json.Marshal(job)
 	if err != nil {

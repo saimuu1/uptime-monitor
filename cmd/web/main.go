@@ -117,6 +117,7 @@ func main() {
 			ExpectedStatus:  200,
 			Enabled:         true,
 			NotifyEmails:    splitEmails(r.FormValue("email")),
+			ExpectedKeyword: strings.TrimSpace(r.FormValue("keyword")),
 		}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
