@@ -4,6 +4,7 @@ package env
 
 import (
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -69,6 +70,16 @@ func WebPass() string { return os.Getenv("WEB_PASS") }
 // MetricsAddr is the listen address for a service's /metrics endpoint.
 func MetricsAddr() string {
 	return orDefault("METRICS_ADDR", ":2112")
+}
+
+// CertWarnDays: warn when an HTTPS cert is within this many days of expiring.
+func CertWarnDays() int {
+	if v := os.Getenv("CERT_WARN_DAYS"); v != "" {
+		if d, err := strconv.Atoi(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 14
 }
 
 func orDefault(key, def string) string {

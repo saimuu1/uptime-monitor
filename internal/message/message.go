@@ -38,4 +38,5 @@ type CheckResult struct {
 	StatusCode int       `json:"status_code"`
 	LatencyMs  int       `json:"latency_ms"`
 	Error      string    `json:"error"`
+	CertExpiry time.Time `json:"cert_expiry"` // TLS cert NotAfter (zero if none)
 }
