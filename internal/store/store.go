@@ -185,6 +185,44 @@ type Status struct {
 	LastCheck *time.Time // most recent check time, nil if none in 24h
 }
 
+// DayUptime is one day's up-ratio for a monitor.
+type DayUptime struct {
+	MonitorID int64
+	Day       time.Time
+	Ratio     float64 // 0..1 fraction of checks that were up that day
+	Count     int
+}
+
+// UptimeHistory returns per-day up-ratios for every monitor over the last `days`
+// days. Only days that actually had checks appear; the caller fills the gaps as
+// "no data" (that's the grey at the start of a status-page history strip).
+func (s *Store) UptimeHistory(ctx context.Context, days int) ([]DayUptime, error) {
+	const q = `
+		SELECT monitor_id,
+		       date_trunc('day', time) AS day,
+		       avg(CASE WHEN up THEN 1.0 ELSE 0.0 END) AS ratio,
+		       count(*) AS n
+		FROM checks
+		WHERE time > now() - make_interval(days => $1)
+		GROUP BY monitor_id, day
+		ORDER BY day`
+	rows, err := s.pool.Query(ctx, q, days)
+	if err != nil {
+		return nil, fmt.Errorf("uptime history: %w", err)
+	}
+	defer rows.Close()
+
+	var out []DayUptime
+	for rows.Next() {
+		var d DayUptime
+		if err := rows.Scan(&d.MonitorID, &d.Day, &d.Ratio, &d.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 // MonitorStatuses returns the current state of every enabled monitor: whether
 // it has an open incident, its 24h uptime, and when it was last checked.
 func (s *Store) MonitorStatuses(ctx context.Context) ([]Status, error) {

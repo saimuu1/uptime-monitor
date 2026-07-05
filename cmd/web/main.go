@@ -20,6 +20,13 @@ import (
 	"github.com/saimuu1/uptime-monitor/web"
 )
 
+const historyDays = 90
+
+type bar struct {
+	Class string // up | partial | down | nodata
+	Title string // tooltip, e.g. "Jul 4: 100%"
+}
+
 type row struct {
 	ID        int64
 	Name      string
@@ -28,6 +35,7 @@ type row struct {
 	DotClass  string
 	UptimePct string
 	LastCheck string
+	Bars      []bar
 }
 
 type page struct {
@@ -57,7 +65,11 @@ func main() {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if err := tmpl.Execute(w, buildPage(statuses)); err != nil {
+		history, err := st.UptimeHistory(r.Context(), historyDays)
+		if err != nil {
+			log.Printf("history: %v", err) // non-fatal: page still renders without bars
+		}
+		if err := tmpl.Execute(w, buildPage(statuses, history)); err != nil {
 			log.Printf("render: %v", err)
 		}
 	})
@@ -149,7 +161,17 @@ func basicAuth(h http.Handler, user, pass string) http.Handler {
 	})
 }
 
-func buildPage(statuses []store.Status) page {
+func buildPage(statuses []store.Status, history []store.DayUptime) page {
+	// Index history by monitor + UTC day so we can look up each bar.
+	byDay := make(map[int64]map[string]store.DayUptime)
+	for _, d := range history {
+		key := d.Day.UTC().Format("2006-01-02")
+		if byDay[d.MonitorID] == nil {
+			byDay[d.MonitorID] = make(map[string]store.DayUptime)
+		}
+		byDay[d.MonitorID][key] = d
+	}
+
 	p := page{Updated: time.Now().Format("15:04:05 MST")}
 	for _, s := range statuses {
 		r := row{
@@ -159,6 +181,7 @@ func buildPage(statuses []store.Status) page {
 			Down:      s.Down,
 			UptimePct: fmt.Sprintf("%.2f%% (24h)", s.Uptime24h*100),
 			LastCheck: "never",
+			Bars:      buildBars(byDay[s.ID]),
 		}
 		switch {
 		case s.Down:
@@ -177,6 +200,29 @@ func buildPage(statuses []store.Status) page {
 		p.Rows = append(p.Rows, r)
 	}
 	return p
+}
+
+// buildBars renders the last historyDays days as colored bars, oldest to
+// newest. Days with no checks show as "no data" (grey), like a real status page.
+func buildBars(days map[string]store.DayUptime) []bar {
+	bars := make([]bar, 0, historyDays)
+	today := time.Now().UTC()
+	for i := historyDays - 1; i >= 0; i-- {
+		d := today.AddDate(0, 0, -i)
+		label := d.Format("Jan 2")
+		day, ok := days[d.Format("2006-01-02")]
+		switch {
+		case !ok:
+			bars = append(bars, bar{Class: "nodata", Title: label + " · no data"})
+		case day.Ratio >= 0.999:
+			bars = append(bars, bar{Class: "up", Title: fmt.Sprintf("%s · 100%%", label)})
+		case day.Ratio >= 0.9:
+			bars = append(bars, bar{Class: "partial", Title: fmt.Sprintf("%s · %.1f%%", label, day.Ratio*100)})
+		default:
+			bars = append(bars, bar{Class: "down", Title: fmt.Sprintf("%s · %.1f%%", label, day.Ratio*100)})
+		}
+	}
+	return bars
 }
 
 // normalizeURL adds https:// if the user didn't type a scheme.
