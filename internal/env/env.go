@@ -61,6 +61,11 @@ func WebAddr() string {
 	return orDefault("WEB_ADDR", ":8090")
 }
 
+// WebUser / WebPass gate the status page with HTTP Basic Auth. When either is
+// empty the page is open (fine locally; set both before exposing it publicly).
+func WebUser() string { return os.Getenv("WEB_USER") }
+func WebPass() string { return os.Getenv("WEB_PASS") }
+
 // MetricsAddr is the listen address for a service's /metrics endpoint.
 func MetricsAddr() string {
 	return orDefault("METRICS_ADDR", ":2112")
