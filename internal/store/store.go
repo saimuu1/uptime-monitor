@@ -268,6 +268,38 @@ func (s *Store) MonitorStatuses(ctx context.Context) ([]Status, error) {
 	return out, rows.Err()
 }
 
+// Incident is a past or ongoing outage, with the monitor's name joined in.
+type Incident struct {
+	MonitorName string
+	StartedAt   time.Time
+	ResolvedAt  *time.Time // nil = still ongoing
+	Cause       string
+}
+
+// RecentIncidents returns the most recent incidents (newest first).
+func (s *Store) RecentIncidents(ctx context.Context, limit int) ([]Incident, error) {
+	const q = `
+		SELECT m.name, i.started_at, i.resolved_at, COALESCE(i.cause, '')
+		FROM incidents i JOIN monitors m ON m.id = i.monitor_id
+		ORDER BY i.started_at DESC
+		LIMIT $1`
+	rows, err := s.pool.Query(ctx, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("recent incidents: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Incident
+	for rows.Next() {
+		var in Incident
+		if err := rows.Scan(&in.MonitorName, &in.StartedAt, &in.ResolvedAt, &in.Cause); err != nil {
+			return nil, err
+		}
+		out = append(out, in)
+	}
+	return out, rows.Err()
+}
+
 // ResolveIncident closes the currently-open incident for a monitor.
 func (s *Store) ResolveIncident(ctx context.Context, monitorID int64) error {
 	const q = `

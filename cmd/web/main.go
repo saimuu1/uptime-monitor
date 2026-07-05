@@ -54,7 +54,7 @@ func main() {
 	}
 	defer st.Close()
 
-	tmpl := template.Must(template.ParseFS(web.Templates, "templates/status.html"))
+	tmpl := template.Must(template.ParseFS(web.Templates, "templates/*.html"))
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", metrics.Handler())
@@ -71,7 +71,19 @@ func main() {
 		if err != nil {
 			log.Printf("history: %v", err) // non-fatal: page still renders without bars
 		}
-		if err := tmpl.Execute(w, buildPage(statuses, history)); err != nil {
+		if err := tmpl.ExecuteTemplate(w, "status.html", buildPage(statuses, history)); err != nil {
+			log.Printf("render: %v", err)
+		}
+	})
+
+	// Incident history page.
+	mux.HandleFunc("GET /incidents", func(w http.ResponseWriter, r *http.Request) {
+		incidents, err := st.RecentIncidents(r.Context(), 50)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := tmpl.ExecuteTemplate(w, "incidents.html", buildIncidents(incidents)); err != nil {
 			log.Printf("render: %v", err)
 		}
 	})
@@ -207,6 +219,51 @@ func buildPage(statuses []store.Status, history []store.DayUptime) page {
 		p.Rows = append(p.Rows, r)
 	}
 	return p
+}
+
+type incidentRow struct {
+	Monitor  string
+	Cause    string
+	Duration string
+	When     string
+	Ongoing  bool
+}
+
+type incidentsPage struct {
+	Incidents []incidentRow
+}
+
+func buildIncidents(incidents []store.Incident) incidentsPage {
+	var p incidentsPage
+	for _, in := range incidents {
+		r := incidentRow{
+			Monitor: in.MonitorName,
+			Cause:   in.Cause,
+			When:    in.StartedAt.Format("Jan 2, 15:04"),
+		}
+		if in.ResolvedAt == nil {
+			r.Ongoing = true
+			r.Duration = "ongoing · " + humanizeDuration(time.Since(in.StartedAt))
+		} else {
+			r.Duration = humanizeDuration(in.ResolvedAt.Sub(in.StartedAt))
+		}
+		p.Incidents = append(p.Incidents, r)
+	}
+	return p
+}
+
+// humanizeDuration renders a span like "3m 12s" or "1h 4m".
+func humanizeDuration(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
+	default:
+		return fmt.Sprintf("%dd %dh", int(d.Hours())/24, int(d.Hours())%24)
+	}
 }
 
 // buildBars renders the last historyDays days as colored bars, oldest to
