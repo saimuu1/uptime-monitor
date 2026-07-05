@@ -23,9 +23,10 @@ type Monitor struct {
 // Result is the outcome of one check.
 type Result struct {
 	Up         bool
-	StatusCode int    // 0 if the request never completed (e.g. timeout).
-	LatencyMs  int    // wall-clock time for the request.
-	Err        string // human-readable error, empty on success.
+	StatusCode int       // 0 if the request never completed (e.g. timeout).
+	LatencyMs  int       // wall-clock time for the request.
+	Err        string    // human-readable error, empty on success.
+	CertExpiry time.Time // TLS cert NotAfter for HTTPS; zero if not applicable.
 }
 
 // Do performs one HTTP request against m, bounded by m.Timeout via a derived
@@ -58,9 +59,14 @@ func Do(ctx context.Context, m Monitor) Result {
 	// Drain the body so the connection can be reused by the transport.
 	_, _ = io.Copy(io.Discard, resp.Body)
 
-	return Result{
+	res := Result{
 		Up:         resp.StatusCode == m.ExpectedStatus,
 		StatusCode: resp.StatusCode,
 		LatencyMs:  latency,
 	}
+	// For HTTPS, note when the server's certificate expires.
+	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
+		res.CertExpiry = resp.TLS.PeerCertificates[0].NotAfter
+	}
+	return res
 }

@@ -18,8 +18,9 @@ import (
 type Kind string
 
 const (
-	Down      Kind = "DOWN"
-	Recovered Kind = "RECOVERED"
+	Down         Kind = "DOWN"
+	Recovered    Kind = "RECOVERED"
+	CertExpiring Kind = "CERT EXPIRING"
 )
 
 // Event is a notification about a monitor's state change.
@@ -39,10 +40,14 @@ func (e Event) Subject() string {
 
 // Message renders the human-readable line sent to the webhook.
 func (e Event) Message() string {
-	if e.Kind == Down {
+	switch e.Kind {
+	case Down:
 		return fmt.Sprintf("🔴 DOWN — %s (agreed by regions incl. %s): %s", e.Monitor, e.Region, e.Cause)
+	case CertExpiring:
+		return fmt.Sprintf("⚠️ SSL CERT EXPIRING — %s: %s", e.Monitor, e.Cause)
+	default:
+		return fmt.Sprintf("🟢 RECOVERED — %s (region %s)", e.Monitor, e.Region)
 	}
-	return fmt.Sprintf("🟢 RECOVERED — %s (region %s)", e.Monitor, e.Region)
 }
 
 // Recipients returns the monitor's own recipient list, or the fallback address

@@ -36,6 +36,8 @@ type row struct {
 	UptimePct string
 	LastCheck string
 	Bars      []bar
+	Cert      string // "SSL 87d" etc., empty if unknown
+	CertWarn  bool   // cert expiring soon
 }
 
 type page struct {
@@ -196,6 +198,11 @@ func buildPage(statuses []store.Status, history []store.DayUptime) page {
 		}
 		if s.LastCheck != nil {
 			r.LastCheck = humanizeAgo(time.Since(*s.LastCheck))
+		}
+		if s.CertExpiry != nil {
+			days := int(time.Until(*s.CertExpiry).Hours() / 24)
+			r.Cert = fmt.Sprintf("SSL %dd", days)
+			r.CertWarn = days < 14
 		}
 		p.Rows = append(p.Rows, r)
 	}

@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os/signal"
 	"strconv"
@@ -29,21 +30,23 @@ import (
 
 // entry is the evaluator's per-monitor bookkeeping around the pure engine.
 type entry struct {
-	id         int64
-	name       string
-	engine     *evaluate.Monitor
-	lastRegion string // region of the most recent result (for alert context)
-	lastMs     int    // latency of the most recent result
-	downCause  string // cause from the most recent down result
+	id          int64
+	name        string
+	engine      *evaluate.Monitor
+	lastRegion  string // region of the most recent result (for alert context)
+	lastMs      int    // latency of the most recent result
+	downCause   string // cause from the most recent down result
+	certAlerted bool   // already warned about the current cert nearing expiry
 }
 
 type evaluator struct {
-	st        *store.Store
-	notifiers []alert.Notifier
-	defaultTo string // fallback email for monitors with no explicit recipients
-	cfg       evaluate.Config
-	mu        sync.Mutex
-	monitors  map[int64]*entry
+	st           *store.Store
+	notifiers    []alert.Notifier
+	defaultTo    string // fallback email for monitors with no explicit recipients
+	certWarnDays int    // warn when a cert is within this many days of expiring
+	cfg          evaluate.Config
+	mu           sync.Mutex
+	monitors     map[int64]*entry
 }
 
 func main() {
@@ -73,11 +76,12 @@ func main() {
 	}
 
 	e := &evaluator{
-		st:        st,
-		notifiers: notifiers,
-		defaultTo: defaultTo,
-		cfg:       evaluate.Config{Freshness: env.ConsensusFreshness(), Stability: env.ConsensusStability()},
-		monitors:  make(map[int64]*entry),
+		st:           st,
+		notifiers:    notifiers,
+		defaultTo:    defaultTo,
+		certWarnDays: env.CertWarnDays(),
+		cfg:          evaluate.Config{Freshness: env.ConsensusFreshness(), Stability: env.ConsensusStability()},
+		monitors:     make(map[int64]*entry),
 	}
 
 	// Seed engines from the DB so a restart mid-outage doesn't reopen incidents.
@@ -173,8 +177,35 @@ func (e *evaluator) handleResult(ctx context.Context, data []byte) {
 	}
 
 	metrics.ResultsProcessed.Inc()
+	e.checkCert(ctx, en, r.CertExpiry)
 	en.engine.Observe(r.Region, evaluate.Sample{Up: r.Up, At: r.CheckedAt})
 	e.commit(ctx, en, en.engine.Evaluate(time.Now()))
+}
+
+// checkCert records a monitor's TLS cert expiry and emails once when it's within
+// the warning window. Re-arms if the cert is renewed (expiry moves out again).
+// Caller must hold e.mu.
+func (e *evaluator) checkCert(ctx context.Context, en *entry, expiry time.Time) {
+	if expiry.IsZero() {
+		return // non-HTTPS or no cert seen
+	}
+	if err := e.st.SetCertExpiry(ctx, en.id, expiry); err != nil {
+		log.Printf("[%s] cert expiry: %v", en.name, err)
+	}
+	daysLeft := int(time.Until(expiry).Hours() / 24)
+	if daysLeft >= e.certWarnDays {
+		en.certAlerted = false // healthy / renewed — re-arm the warning
+		return
+	}
+	if en.certAlerted {
+		return // already warned about this cert
+	}
+	en.certAlerted = true
+	cause := fmt.Sprintf("expires in %d days (%s)", daysLeft, expiry.Format("2006-01-02"))
+	log.Printf("CERT EXPIRING  [%s] %s", en.name, cause)
+	metrics.AlertsSent.WithLabelValues("cert").Inc()
+	e.notify(ctx, alert.Event{Monitor: en.name, Kind: alert.CertExpiring,
+		Cause: cause, At: time.Now(), To: e.recipients(ctx, en.id)})
 }
 
 // commit turns a committed engine event into DB writes, a log line, and an

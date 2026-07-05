@@ -176,13 +176,23 @@ func (s *Store) OpenIncident(ctx context.Context, monitorID int64, cause string)
 
 // Status is a monitor's current state for the status page.
 type Status struct {
-	ID        int64
-	Name      string
-	URL       string
-	Down      bool       // has an open (unresolved) incident
-	Uptime24h float64    // fraction 0..1 of checks up in the last 24h
-	Checks24h int        // number of checks in the last 24h (0 => "no data")
-	LastCheck *time.Time // most recent check time, nil if none in 24h
+	ID         int64
+	Name       string
+	URL        string
+	Down       bool       // has an open (unresolved) incident
+	Uptime24h  float64    // fraction 0..1 of checks up in the last 24h
+	Checks24h  int        // number of checks in the last 24h (0 => "no data")
+	LastCheck  *time.Time // most recent check time, nil if none in 24h
+	CertExpiry *time.Time // TLS cert expiry (HTTPS monitors), nil if unknown
+}
+
+// SetCertExpiry records a monitor's TLS certificate expiry (from a check).
+func (s *Store) SetCertExpiry(ctx context.Context, monitorID int64, expiry time.Time) error {
+	_, err := s.pool.Exec(ctx, `UPDATE monitors SET cert_expiry = $2 WHERE id = $1`, monitorID, expiry)
+	if err != nil {
+		return fmt.Errorf("set cert expiry: %w", err)
+	}
+	return nil
 }
 
 // DayUptime is one day's up-ratio for a monitor.
@@ -232,12 +242,13 @@ func (s *Store) MonitorStatuses(ctx context.Context) ([]Status, error) {
 				WHERE i.monitor_id = m.id AND i.resolved_at IS NULL) AS down,
 			COALESCE(AVG(CASE WHEN c.up THEN 1.0 ELSE 0.0 END), 1.0) AS uptime,
 			COUNT(c.*) AS checks,
-			MAX(c.time) AS last_check
+			MAX(c.time) AS last_check,
+			m.cert_expiry
 		FROM monitors m
 		LEFT JOIN checks c
 			ON c.monitor_id = m.id AND c.time > now() - interval '24 hours'
 		WHERE m.enabled
-		GROUP BY m.id, m.name, m.url
+		GROUP BY m.id, m.name, m.url, m.cert_expiry
 		ORDER BY m.id`
 	rows, err := s.pool.Query(ctx, q)
 	if err != nil {
@@ -249,7 +260,7 @@ func (s *Store) MonitorStatuses(ctx context.Context) ([]Status, error) {
 	for rows.Next() {
 		var st Status
 		if err := rows.Scan(&st.ID, &st.Name, &st.URL, &st.Down,
-			&st.Uptime24h, &st.Checks24h, &st.LastCheck); err != nil {
+			&st.Uptime24h, &st.Checks24h, &st.LastCheck, &st.CertExpiry); err != nil {
 			return nil, err
 		}
 		out = append(out, st)

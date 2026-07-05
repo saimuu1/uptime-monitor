@@ -75,6 +75,7 @@ func handleJob(ctx context.Context, nc *nats.Conn, region string, data []byte) {
 		StatusCode: res.StatusCode,
 		LatencyMs:  res.LatencyMs,
 		Error:      res.Err,
+		CertExpiry: res.CertExpiry,
 	}
 
 	payload, err := json.Marshal(result)
