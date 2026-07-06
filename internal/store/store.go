@@ -224,15 +224,26 @@ func (s *Store) DeleteMonitor(ctx context.Context, id, userID int64) error {
 	return tx.Commit(ctx)
 }
 
-// NotifyEmails returns the current recipient list for a monitor. Looked up at
-// alert time so it's always fresh, regardless of process start order.
-func (s *Store) NotifyEmails(ctx context.Context, monitorID int64) ([]string, error) {
-	const q = `SELECT notify_emails FROM monitors WHERE id = $1`
+// AlertRecipients returns who to email for a monitor's alerts, looked up fresh
+// at alert time: the monitor's explicit notify_emails, or — if it has none — the
+// owner's account email. Empty means "fall back to the global default".
+func (s *Store) AlertRecipients(ctx context.Context, monitorID int64) ([]string, error) {
+	const q = `
+		SELECT m.notify_emails, u.email
+		FROM monitors m LEFT JOIN users u ON u.id = m.user_id
+		WHERE m.id = $1`
 	var emails []string
-	if err := s.pool.QueryRow(ctx, q, monitorID).Scan(&emails); err != nil {
-		return nil, fmt.Errorf("notify emails: %w", err)
+	var ownerEmail *string
+	if err := s.pool.QueryRow(ctx, q, monitorID).Scan(&emails, &ownerEmail); err != nil {
+		return nil, fmt.Errorf("alert recipients: %w", err)
 	}
-	return emails, nil
+	if len(emails) > 0 {
+		return emails, nil
+	}
+	if ownerEmail != nil && *ownerEmail != "" {
+		return []string{*ownerEmail}, nil
+	}
+	return nil, nil
 }
 
 // InsertCheck records one check result in the time-series hypertable at the
