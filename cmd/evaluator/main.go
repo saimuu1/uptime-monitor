@@ -238,10 +238,10 @@ func (e *evaluator) commit(ctx context.Context, en *entry, ev evaluate.Event) {
 	metrics.MonitorUp.WithLabelValues(en.name).Set(up)
 }
 
-// recipients fetches a monitor's alert emails at send time (always fresh),
-// falling back to the default recipient when the monitor lists none.
+// recipients fetches a monitor's alert emails at send time (always fresh):
+// explicit recipients, else the owner's account email, else the global default.
 func (e *evaluator) recipients(ctx context.Context, monitorID int64) []string {
-	to, err := e.st.NotifyEmails(ctx, monitorID)
+	to, err := e.st.AlertRecipients(ctx, monitorID)
 	if err != nil {
 		log.Printf("recipients for monitor %d: %v", monitorID, err)
 	}
