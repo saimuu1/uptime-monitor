@@ -115,8 +115,6 @@ services:
     environment:
       <<: *app-env
       WEB_ADDR: ":8090"
-      WEB_USER: ${WEB_USER:-}
-      WEB_PASS: ${WEB_PASS:-}
     ports:
       - "8090:8090"
     depends_on:
