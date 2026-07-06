@@ -29,6 +29,7 @@ type MonitorConfig struct {
 	Enabled         *bool    `yaml:"enabled"` // pointer so an omitted value defaults to true
 	NotifyEmails    []string `yaml:"notify_emails"`
 	ExpectedKeyword string   `yaml:"expected_keyword"`
+	SlowThresholdMs int      `yaml:"slow_threshold_ms"`
 }
 
 // Load reads and parses the YAML file at path.
@@ -69,6 +70,7 @@ func (m MonitorConfig) toStoreMonitor() store.Monitor {
 		Enabled:         true,
 		NotifyEmails:    m.NotifyEmails,
 		ExpectedKeyword: m.ExpectedKeyword,
+		SlowThresholdMs: m.SlowThresholdMs,
 	}
 	if sm.Method == "" {
 		sm.Method = "GET"

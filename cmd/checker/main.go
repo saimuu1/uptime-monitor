@@ -68,15 +68,16 @@ func handleJob(ctx context.Context, nc *nats.Conn, region string, data []byte) {
 	})
 
 	result := message.CheckResult{
-		MonitorID:  job.MonitorID,
-		Name:       job.Name,
-		Region:     region,
-		CheckedAt:  time.Now(),
-		Up:         res.Up,
-		StatusCode: res.StatusCode,
-		LatencyMs:  res.LatencyMs,
-		Error:      res.Err,
-		CertExpiry: res.CertExpiry,
+		MonitorID:       job.MonitorID,
+		Name:            job.Name,
+		Region:          region,
+		CheckedAt:       time.Now(),
+		Up:              res.Up,
+		StatusCode:      res.StatusCode,
+		LatencyMs:       res.LatencyMs,
+		Error:           res.Err,
+		CertExpiry:      res.CertExpiry,
+		SlowThresholdMs: job.SlowThresholdMs,
 	}
 
 	payload, err := json.Marshal(result)

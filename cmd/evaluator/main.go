@@ -37,6 +37,8 @@ type entry struct {
 	lastMs      int    // latency of the most recent result
 	downCause   string // cause from the most recent down result
 	certAlerted bool   // already warned about the current cert nearing expiry
+	slowStreak  int    // consecutive slow (over-threshold) checks
+	slowAlerted bool   // already warned about the current slow spell
 }
 
 type evaluator struct {
@@ -178,8 +180,34 @@ func (e *evaluator) handleResult(ctx context.Context, data []byte) {
 
 	metrics.ResultsProcessed.Inc()
 	e.checkCert(ctx, en, r.CertExpiry)
+	e.checkSlow(ctx, en, r)
 	en.engine.Observe(r.Region, evaluate.Sample{Up: r.Up, At: r.CheckedAt})
 	e.commit(ctx, en, en.engine.Evaluate(time.Now()))
+}
+
+// slowStreakToAlert is how many consecutive over-threshold checks before we warn
+// (so a single latency spike doesn't page anyone).
+const slowStreakToAlert = 3
+
+// checkSlow warns once when a monitor stays up but responds slower than its
+// threshold for several checks in a row; re-arms once it's fast again.
+// Caller must hold e.mu.
+func (e *evaluator) checkSlow(ctx context.Context, en *entry, r message.CheckResult) {
+	if r.SlowThresholdMs <= 0 || !r.Up || r.LatencyMs <= r.SlowThresholdMs {
+		en.slowStreak = 0
+		en.slowAlerted = false
+		return
+	}
+	en.slowStreak++
+	if en.slowStreak < slowStreakToAlert || en.slowAlerted {
+		return
+	}
+	en.slowAlerted = true
+	cause := fmt.Sprintf("%dms responses (over %dms) for %d checks", r.LatencyMs, r.SlowThresholdMs, en.slowStreak)
+	log.Printf("SLOW  [%s] %s", en.name, cause)
+	metrics.AlertsSent.WithLabelValues("slow").Inc()
+	e.notify(ctx, alert.Event{Monitor: en.name, Kind: alert.Slow,
+		Cause: cause, At: time.Now(), To: e.recipients(ctx, en.id)})
 }
 
 // checkCert records a monitor's TLS cert expiry and emails once when it's within

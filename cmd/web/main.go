@@ -125,6 +125,7 @@ func main() {
 			Enabled:         true,
 			NotifyEmails:    splitEmails(r.FormValue("email")),
 			ExpectedKeyword: strings.TrimSpace(r.FormValue("keyword")),
+			SlowThresholdMs: atoiOr(r.FormValue("slow_ms"), 0),
 		}, userID(r.Context())); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -279,6 +280,14 @@ func normalizeURL(u string) string {
 		return "https://" + u
 	}
 	return u
+}
+
+// atoiOr parses s as an int, returning dflt on empty/invalid input.
+func atoiOr(s string, dflt int) int {
+	if v, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && v >= 0 {
+		return v
+	}
+	return dflt
 }
 
 // splitEmails turns a comma/space-separated string into a clean list.

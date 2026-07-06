@@ -25,19 +25,21 @@ type CheckJob struct {
 	TimeoutMs       int    `json:"timeout_ms"`
 	ExpectedStatus  int    `json:"expected_status"`
 	ExpectedKeyword string `json:"expected_keyword"`
+	SlowThresholdMs int    `json:"slow_threshold_ms"`
 }
 
 // CheckResult is the outcome of one check, tagged with the region it ran from
 // and the moment it ran (so the evaluator stores the real check time, not the
 // time it happened to process the message).
 type CheckResult struct {
-	MonitorID  int64     `json:"monitor_id"`
-	Name       string    `json:"name"`
-	Region     string    `json:"region"`
-	CheckedAt  time.Time `json:"checked_at"`
-	Up         bool      `json:"up"`
-	StatusCode int       `json:"status_code"`
-	LatencyMs  int       `json:"latency_ms"`
-	Error      string    `json:"error"`
-	CertExpiry time.Time `json:"cert_expiry"` // TLS cert NotAfter (zero if none)
+	MonitorID       int64     `json:"monitor_id"`
+	Name            string    `json:"name"`
+	Region          string    `json:"region"`
+	CheckedAt       time.Time `json:"checked_at"`
+	Up              bool      `json:"up"`
+	StatusCode      int       `json:"status_code"`
+	LatencyMs       int       `json:"latency_ms"`
+	Error           string    `json:"error"`
+	CertExpiry      time.Time `json:"cert_expiry"` // TLS cert NotAfter (zero if none)
+	SlowThresholdMs int       `json:"slow_threshold_ms"`
 }
