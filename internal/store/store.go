@@ -5,8 +5,10 @@ package store
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/saimuu1/uptime-monitor/internal/check"
@@ -15,6 +17,68 @@ import (
 // Store wraps the connection pool. Construct one with New and Close it on exit.
 type Store struct {
 	pool *pgxpool.Pool
+}
+
+// --- users & sessions (auth) ---
+
+// ErrEmailTaken is returned by CreateUser when the email already exists.
+var ErrEmailTaken = fmt.Errorf("email already registered")
+
+// CreateUser inserts a user and returns its id. Duplicate email => ErrEmailTaken.
+func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (int64, error) {
+	const q = `INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id`
+	var id int64
+	err := s.pool.QueryRow(ctx, q, email, passwordHash).Scan(&id)
+	if err != nil {
+		if strings.Contains(err.Error(), "users_email_key") {
+			return 0, ErrEmailTaken
+		}
+		return 0, fmt.Errorf("create user: %w", err)
+	}
+	return id, nil
+}
+
+// UserByEmail returns a user's id and password hash for login. Missing user
+// returns ok=false (no error) so callers can't distinguish it by error type.
+func (s *Store) UserByEmail(ctx context.Context, email string) (id int64, hash string, ok bool, err error) {
+	const q = `SELECT id, password_hash FROM users WHERE email = $1`
+	err = s.pool.QueryRow(ctx, q, email).Scan(&id, &hash)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return 0, "", false, nil
+		}
+		return 0, "", false, fmt.Errorf("user by email: %w", err)
+	}
+	return id, hash, true, nil
+}
+
+// CreateSession stores a session token for a user until expiry.
+func (s *Store) CreateSession(ctx context.Context, token string, userID int64, expires time.Time) error {
+	const q = `INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)`
+	_, err := s.pool.Exec(ctx, q, token, userID, expires)
+	if err != nil {
+		return fmt.Errorf("create session: %w", err)
+	}
+	return nil
+}
+
+// UserBySession resolves a non-expired session token to a user id.
+func (s *Store) UserBySession(ctx context.Context, token string) (userID int64, ok bool, err error) {
+	const q = `SELECT user_id FROM sessions WHERE token = $1 AND expires_at > now()`
+	err = s.pool.QueryRow(ctx, q, token).Scan(&userID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("user by session: %w", err)
+	}
+	return userID, true, nil
+}
+
+// DeleteSession removes a session (logout).
+func (s *Store) DeleteSession(ctx context.Context, token string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM sessions WHERE token = $1`, token)
+	return err
 }
 
 // Monitor is the full monitor record as persisted.
