@@ -299,6 +299,8 @@ type Status struct {
 	Checks24h  int        // number of checks in the last 24h (0 => "no data")
 	LastCheck  *time.Time // most recent check time, nil if none in 24h
 	CertExpiry *time.Time // TLS cert expiry (HTTPS monitors), nil if unknown
+	P50ms      *float64   // median response time (24h, up checks), nil if none
+	P95ms      *float64   // 95th-percentile response time (24h, up checks)
 }
 
 // SetCertExpiry records a monitor's TLS certificate expiry (from a check).
@@ -358,7 +360,9 @@ func (s *Store) MonitorStatusesForUser(ctx context.Context, userID int64) ([]Sta
 			COALESCE(AVG(CASE WHEN c.up THEN 1.0 ELSE 0.0 END), 1.0) AS uptime,
 			COUNT(c.*) AS checks,
 			MAX(c.time) AS last_check,
-			m.cert_expiry
+			m.cert_expiry,
+			percentile_cont(0.5)  WITHIN GROUP (ORDER BY c.latency_ms) FILTER (WHERE c.up) AS p50,
+			percentile_cont(0.95) WITHIN GROUP (ORDER BY c.latency_ms) FILTER (WHERE c.up) AS p95
 		FROM monitors m
 		LEFT JOIN checks c
 			ON c.monitor_id = m.id AND c.time > now() - interval '24 hours'
@@ -375,7 +379,7 @@ func (s *Store) MonitorStatusesForUser(ctx context.Context, userID int64) ([]Sta
 	for rows.Next() {
 		var st Status
 		if err := rows.Scan(&st.ID, &st.Name, &st.URL, &st.Down,
-			&st.Uptime24h, &st.Checks24h, &st.LastCheck, &st.CertExpiry); err != nil {
+			&st.Uptime24h, &st.Checks24h, &st.LastCheck, &st.CertExpiry, &st.P50ms, &st.P95ms); err != nil {
 			return nil, err
 		}
 		out = append(out, st)
