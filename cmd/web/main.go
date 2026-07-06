@@ -44,6 +44,7 @@ type page struct {
 	UpCount   int
 	DownCount int
 	Updated   string
+	UserEmail string
 }
 
 func main() {
@@ -64,7 +65,8 @@ func main() {
 		fmt.Fprint(w, "ok")
 	})
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		statuses, err := st.MonitorStatuses(r.Context())
+		uid := userID(r.Context())
+		statuses, err := st.MonitorStatusesForUser(r.Context(), uid)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -73,14 +75,16 @@ func main() {
 		if err != nil {
 			log.Printf("history: %v", err) // non-fatal: page still renders without bars
 		}
-		if err := tmpl.ExecuteTemplate(w, "status.html", buildPage(statuses, history)); err != nil {
+		pg := buildPage(statuses, history)
+		pg.UserEmail, _ = st.UserEmail(r.Context(), uid)
+		if err := tmpl.ExecuteTemplate(w, "status.html", pg); err != nil {
 			log.Printf("render: %v", err)
 		}
 	})
 
 	// Incident history page.
 	mux.HandleFunc("GET /incidents", func(w http.ResponseWriter, r *http.Request) {
-		incidents, err := st.RecentIncidents(r.Context(), 50)
+		incidents, err := st.RecentIncidentsForUser(r.Context(), userID(r.Context()), 50)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -110,7 +114,7 @@ func main() {
 		if v, err := strconv.Atoi(r.FormValue("interval_seconds")); err == nil && v > 0 {
 			interval = v
 		}
-		if _, err := st.UpsertMonitor(r.Context(), store.Monitor{
+		if _, err := st.CreateMonitor(r.Context(), store.Monitor{
 			Name:            name,
 			URL:             url,
 			Method:          "GET",
@@ -120,21 +124,21 @@ func main() {
 			Enabled:         true,
 			NotifyEmails:    splitEmails(r.FormValue("email")),
 			ExpectedKeyword: strings.TrimSpace(r.FormValue("keyword")),
-		}); err != nil {
+		}, userID(r.Context())); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 
-	// Remove a site.
+	// Remove a site (only your own).
 	mux.HandleFunc("POST /monitors/delete", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
 		if err != nil {
 			http.Error(w, "bad id", http.StatusBadRequest)
 			return
 		}
-		if err := st.DeleteMonitor(r.Context(), id); err != nil {
+		if err := st.DeleteMonitor(r.Context(), id, userID(r.Context())); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

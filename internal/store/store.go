@@ -112,18 +112,18 @@ func New(ctx context.Context, dbURL string) (*Store, error) {
 // Close releases the pool.
 func (s *Store) Close() { s.pool.Close() }
 
-// UpsertMonitor inserts a monitor from config, or updates the existing row with
-// the same name. Config is the source of truth on (re)start; the returned row
-// carries the DB-assigned id.
+// UpsertMonitor seeds a *system* monitor from config (user_id NULL), inserting
+// or updating the row with the same name. Uniqueness is per the partial index
+// on system monitors, so it doesn't collide with users' monitors.
 func (s *Store) UpsertMonitor(ctx context.Context, m Monitor) (Monitor, error) {
 	// notify_emails is NOT NULL; a nil slice would encode as NULL, so normalize.
 	if m.NotifyEmails == nil {
 		m.NotifyEmails = []string{}
 	}
 	const q = `
-		INSERT INTO monitors (name, url, method, interval_seconds, timeout_ms, expected_status, enabled, notify_emails, expected_keyword)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (name) DO UPDATE SET
+		INSERT INTO monitors (name, url, method, interval_seconds, timeout_ms, expected_status, enabled, notify_emails, expected_keyword, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL)
+		ON CONFLICT (name) WHERE user_id IS NULL DO UPDATE SET
 			url = EXCLUDED.url,
 			method = EXCLUDED.method,
 			interval_seconds = EXCLUDED.interval_seconds,
@@ -140,6 +140,32 @@ func (s *Store) UpsertMonitor(ctx context.Context, m Monitor) (Monitor, error) {
 		return Monitor{}, fmt.Errorf("upsert monitor %q: %w", m.Name, err)
 	}
 	return m, nil
+}
+
+// CreateMonitor adds a monitor owned by a user (from the web form).
+func (s *Store) CreateMonitor(ctx context.Context, m Monitor, userID int64) (int64, error) {
+	if m.NotifyEmails == nil {
+		m.NotifyEmails = []string{}
+	}
+	const q = `
+		INSERT INTO monitors (name, url, method, interval_seconds, timeout_ms, expected_status, enabled, notify_emails, expected_keyword, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		RETURNING id`
+	var id int64
+	err := s.pool.QueryRow(ctx, q,
+		m.Name, m.URL, m.Method, m.IntervalSeconds, m.TimeoutMs, m.ExpectedStatus, m.Enabled, m.NotifyEmails, m.ExpectedKeyword, userID,
+	).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("create monitor %q: %w", m.Name, err)
+	}
+	return id, nil
+}
+
+// UserEmail returns a user's email (for the page header).
+func (s *Store) UserEmail(ctx context.Context, userID int64) (string, error) {
+	var email string
+	err := s.pool.QueryRow(ctx, `SELECT email FROM users WHERE id = $1`, userID).Scan(&email)
+	return email, err
 }
 
 // EnabledMonitors returns every enabled monitor.
@@ -165,15 +191,27 @@ func (s *Store) EnabledMonitors(ctx context.Context) ([]Monitor, error) {
 	return out, rows.Err()
 }
 
-// DeleteMonitor removes a monitor and its history. checks has no FK, incidents
-// does, so clear children first, all in one transaction.
-func (s *Store) DeleteMonitor(ctx context.Context, id int64) error {
+// DeleteMonitor removes a monitor and its history, but only if it belongs to
+// userID. checks has no FK, incidents does, so clear children first.
+func (s *Store) DeleteMonitor(ctx context.Context, id, userID int64) error {
+	// Ownership check: refuse to touch a monitor the user doesn't own.
+	var owner *int64
+	err := s.pool.QueryRow(ctx, `SELECT user_id FROM monitors WHERE id = $1`, id).Scan(&owner)
+	if err == pgx.ErrNoRows {
+		return nil // already gone
+	}
+	if err != nil {
+		return fmt.Errorf("delete monitor: %w", err)
+	}
+	if owner == nil || *owner != userID {
+		return fmt.Errorf("not your monitor")
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
-
 	for _, q := range []string{
 		`DELETE FROM checks WHERE monitor_id = $1`,
 		`DELETE FROM incidents WHERE monitor_id = $1`,
@@ -299,9 +337,9 @@ func (s *Store) UptimeHistory(ctx context.Context, days int) ([]DayUptime, error
 	return out, rows.Err()
 }
 
-// MonitorStatuses returns the current state of every enabled monitor: whether
-// it has an open incident, its 24h uptime, and when it was last checked.
-func (s *Store) MonitorStatuses(ctx context.Context) ([]Status, error) {
+// MonitorStatusesForUser returns the current state of the given user's enabled
+// monitors: whether each has an open incident, its 24h uptime, and last check.
+func (s *Store) MonitorStatusesForUser(ctx context.Context, userID int64) ([]Status, error) {
 	const q = `
 		SELECT m.id, m.name, m.url,
 			EXISTS (SELECT 1 FROM incidents i
@@ -313,10 +351,10 @@ func (s *Store) MonitorStatuses(ctx context.Context) ([]Status, error) {
 		FROM monitors m
 		LEFT JOIN checks c
 			ON c.monitor_id = m.id AND c.time > now() - interval '24 hours'
-		WHERE m.enabled
+		WHERE m.enabled AND m.user_id = $1
 		GROUP BY m.id, m.name, m.url, m.cert_expiry
 		ORDER BY m.id`
-	rows, err := s.pool.Query(ctx, q)
+	rows, err := s.pool.Query(ctx, q, userID)
 	if err != nil {
 		return nil, fmt.Errorf("query statuses: %w", err)
 	}
@@ -342,14 +380,15 @@ type Incident struct {
 	Cause       string
 }
 
-// RecentIncidents returns the most recent incidents (newest first).
-func (s *Store) RecentIncidents(ctx context.Context, limit int) ([]Incident, error) {
+// RecentIncidentsForUser returns a user's most recent incidents (newest first).
+func (s *Store) RecentIncidentsForUser(ctx context.Context, userID int64, limit int) ([]Incident, error) {
 	const q = `
 		SELECT m.name, i.started_at, i.resolved_at, COALESCE(i.cause, '')
 		FROM incidents i JOIN monitors m ON m.id = i.monitor_id
+		WHERE m.user_id = $1
 		ORDER BY i.started_at DESC
-		LIMIT $1`
-	rows, err := s.pool.Query(ctx, q, limit)
+		LIMIT $2`
+	rows, err := s.pool.Query(ctx, q, userID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("recent incidents: %w", err)
 	}
