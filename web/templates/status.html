@@ -146,6 +146,7 @@
           <div class="right">
             {{ if .Down }}<span class="pill down">Down</span>{{ else }}<span class="pill up">Operational</span>{{ end }}
             {{ if .Cert }}<span class="cert {{ if .CertWarn }}warn{{ end }}" title="TLS certificate expiry">{{ .Cert }}</span>{{ end }}
+            {{ if .Latency }}<span class="cert" title="response time — median / 95th percentile (24h)">{{ .Latency }}</span>{{ end }}
             <span class="stat"><b>{{ .UptimePct }}</b> · {{ .LastCheck }}</span>
             <form class="rmform" method="POST" action="/monitors/delete" onsubmit="return confirm('Remove {{ .Name }}?')">
               <input type="hidden" name="id" value="{{ .ID }}">

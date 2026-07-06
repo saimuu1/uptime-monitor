@@ -37,6 +37,7 @@ type row struct {
 	Bars      []bar
 	Cert      string // "SSL 87d" etc., empty if unknown
 	CertWarn  bool   // cert expiring soon
+	Latency   string // "45 / 120 ms" (median / p95), empty if no data
 }
 
 type page struct {
@@ -192,6 +193,9 @@ func buildPage(statuses []store.Status, history []store.DayUptime) page {
 			days := int(time.Until(*s.CertExpiry).Hours() / 24)
 			r.Cert = fmt.Sprintf("SSL %dd", days)
 			r.CertWarn = days < 14
+		}
+		if s.P50ms != nil && s.P95ms != nil {
+			r.Latency = fmt.Sprintf("%.0f / %.0f ms", *s.P50ms, *s.P95ms)
 		}
 		p.Rows = append(p.Rows, r)
 	}
