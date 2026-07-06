@@ -93,6 +93,7 @@ type Monitor struct {
 	Enabled         bool
 	NotifyEmails    []string // addresses to alert on this monitor's outages
 	ExpectedKeyword string   // if set, page body must contain this to be "up"
+	SlowThresholdMs int      // if > 0, alert when response time exceeds this
 }
 
 // New opens a connection pool against the given postgres URL and verifies it
@@ -121,8 +122,8 @@ func (s *Store) UpsertMonitor(ctx context.Context, m Monitor) (Monitor, error) {
 		m.NotifyEmails = []string{}
 	}
 	const q = `
-		INSERT INTO monitors (name, url, method, interval_seconds, timeout_ms, expected_status, enabled, notify_emails, expected_keyword, user_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL)
+		INSERT INTO monitors (name, url, method, interval_seconds, timeout_ms, expected_status, enabled, notify_emails, expected_keyword, slow_threshold_ms, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
 		ON CONFLICT (name) WHERE user_id IS NULL DO UPDATE SET
 			url = EXCLUDED.url,
 			method = EXCLUDED.method,
@@ -131,10 +132,11 @@ func (s *Store) UpsertMonitor(ctx context.Context, m Monitor) (Monitor, error) {
 			expected_status = EXCLUDED.expected_status,
 			enabled = EXCLUDED.enabled,
 			notify_emails = EXCLUDED.notify_emails,
-			expected_keyword = EXCLUDED.expected_keyword
+			expected_keyword = EXCLUDED.expected_keyword,
+			slow_threshold_ms = EXCLUDED.slow_threshold_ms
 		RETURNING id`
 	err := s.pool.QueryRow(ctx, q,
-		m.Name, m.URL, m.Method, m.IntervalSeconds, m.TimeoutMs, m.ExpectedStatus, m.Enabled, m.NotifyEmails, m.ExpectedKeyword,
+		m.Name, m.URL, m.Method, m.IntervalSeconds, m.TimeoutMs, m.ExpectedStatus, m.Enabled, m.NotifyEmails, m.ExpectedKeyword, m.SlowThresholdMs,
 	).Scan(&m.ID)
 	if err != nil {
 		return Monitor{}, fmt.Errorf("upsert monitor %q: %w", m.Name, err)
@@ -148,12 +150,12 @@ func (s *Store) CreateMonitor(ctx context.Context, m Monitor, userID int64) (int
 		m.NotifyEmails = []string{}
 	}
 	const q = `
-		INSERT INTO monitors (name, url, method, interval_seconds, timeout_ms, expected_status, enabled, notify_emails, expected_keyword, user_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO monitors (name, url, method, interval_seconds, timeout_ms, expected_status, enabled, notify_emails, expected_keyword, slow_threshold_ms, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id`
 	var id int64
 	err := s.pool.QueryRow(ctx, q,
-		m.Name, m.URL, m.Method, m.IntervalSeconds, m.TimeoutMs, m.ExpectedStatus, m.Enabled, m.NotifyEmails, m.ExpectedKeyword, userID,
+		m.Name, m.URL, m.Method, m.IntervalSeconds, m.TimeoutMs, m.ExpectedStatus, m.Enabled, m.NotifyEmails, m.ExpectedKeyword, m.SlowThresholdMs, userID,
 	).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("create monitor %q: %w", m.Name, err)
@@ -171,7 +173,7 @@ func (s *Store) UserEmail(ctx context.Context, userID int64) (string, error) {
 // EnabledMonitors returns every enabled monitor.
 func (s *Store) EnabledMonitors(ctx context.Context) ([]Monitor, error) {
 	const q = `
-		SELECT id, name, url, method, interval_seconds, timeout_ms, expected_status, enabled, notify_emails, expected_keyword
+		SELECT id, name, url, method, interval_seconds, timeout_ms, expected_status, enabled, notify_emails, expected_keyword, slow_threshold_ms
 		FROM monitors WHERE enabled = TRUE ORDER BY id`
 	rows, err := s.pool.Query(ctx, q)
 	if err != nil {
@@ -183,7 +185,7 @@ func (s *Store) EnabledMonitors(ctx context.Context) ([]Monitor, error) {
 	for rows.Next() {
 		var m Monitor
 		if err := rows.Scan(&m.ID, &m.Name, &m.URL, &m.Method,
-			&m.IntervalSeconds, &m.TimeoutMs, &m.ExpectedStatus, &m.Enabled, &m.NotifyEmails, &m.ExpectedKeyword); err != nil {
+			&m.IntervalSeconds, &m.TimeoutMs, &m.ExpectedStatus, &m.Enabled, &m.NotifyEmails, &m.ExpectedKeyword, &m.SlowThresholdMs); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

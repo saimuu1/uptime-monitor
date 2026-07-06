@@ -132,6 +132,7 @@ func publishLoop(ctx context.Context, nc *nats.Conn, m store.Monitor) {
 		TimeoutMs:       m.TimeoutMs,
 		ExpectedStatus:  m.ExpectedStatus,
 		ExpectedKeyword: m.ExpectedKeyword,
+		SlowThresholdMs: m.SlowThresholdMs,
 	}
 	payload, err := json.Marshal(job)
 	if err != nil {

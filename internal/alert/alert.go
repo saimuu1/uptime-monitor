@@ -21,6 +21,7 @@ const (
 	Down         Kind = "DOWN"
 	Recovered    Kind = "RECOVERED"
 	CertExpiring Kind = "CERT EXPIRING"
+	Slow         Kind = "SLOW"
 )
 
 // Event is a notification about a monitor's state change.
@@ -45,6 +46,8 @@ func (e Event) Message() string {
 		return fmt.Sprintf("🔴 DOWN — %s (agreed by regions incl. %s): %s", e.Monitor, e.Region, e.Cause)
 	case CertExpiring:
 		return fmt.Sprintf("⚠️ SSL CERT EXPIRING — %s: %s", e.Monitor, e.Cause)
+	case Slow:
+		return fmt.Sprintf("🐢 SLOW — %s: %s", e.Monitor, e.Cause)
 	default:
 		return fmt.Sprintf("🟢 RECOVERED — %s (region %s)", e.Monitor, e.Region)
 	}
