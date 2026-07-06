@@ -206,7 +206,7 @@ func (e *evaluator) checkSlow(ctx context.Context, en *entry, r message.CheckRes
 	cause := fmt.Sprintf("%dms responses (over %dms) for %d checks", r.LatencyMs, r.SlowThresholdMs, en.slowStreak)
 	log.Printf("SLOW  [%s] %s", en.name, cause)
 	metrics.AlertsSent.WithLabelValues("slow").Inc()
-	e.notify(ctx, alert.Event{Monitor: en.name, Kind: alert.Slow,
+	e.notify(ctx, en.id, alert.Event{Monitor: en.name, Kind: alert.Slow,
 		Cause: cause, At: time.Now(), To: e.recipients(ctx, en.id)})
 }
 
@@ -232,7 +232,7 @@ func (e *evaluator) checkCert(ctx context.Context, en *entry, expiry time.Time) 
 	cause := fmt.Sprintf("expires in %d days (%s)", daysLeft, expiry.Format("2006-01-02"))
 	log.Printf("CERT EXPIRING  [%s] %s", en.name, cause)
 	metrics.AlertsSent.WithLabelValues("cert").Inc()
-	e.notify(ctx, alert.Event{Monitor: en.name, Kind: alert.CertExpiring,
+	e.notify(ctx, en.id, alert.Event{Monitor: en.name, Kind: alert.CertExpiring,
 		Cause: cause, At: time.Now(), To: e.recipients(ctx, en.id)})
 }
 
@@ -247,7 +247,7 @@ func (e *evaluator) commit(ctx context.Context, en *entry, ev evaluate.Event) {
 		log.Printf("MONITOR DOWN  [%s] %s", en.name, en.downCause)
 		metrics.IncidentsOpened.Inc()
 		metrics.AlertsSent.WithLabelValues("down").Inc()
-		e.notify(ctx, alert.Event{Monitor: en.name, Kind: alert.Down,
+		e.notify(ctx, en.id, alert.Event{Monitor: en.name, Kind: alert.Down,
 			Region: en.lastRegion, Cause: en.downCause, At: time.Now(), To: e.recipients(ctx, en.id)})
 	case evaluate.Recovered:
 		if err := e.st.ResolveIncident(ctx, en.id); err != nil {
@@ -255,7 +255,7 @@ func (e *evaluator) commit(ctx context.Context, en *entry, ev evaluate.Event) {
 		}
 		log.Printf("MONITOR RECOVERED  [%s] (%dms)", en.name, en.lastMs)
 		metrics.AlertsSent.WithLabelValues("recovered").Inc()
-		e.notify(ctx, alert.Event{Monitor: en.name, Kind: alert.Recovered,
+		e.notify(ctx, en.id, alert.Event{Monitor: en.name, Kind: alert.Recovered,
 			Region: en.lastRegion, At: time.Now(), To: e.recipients(ctx, en.id)})
 	}
 	// Keep the per-monitor up/down gauge fresh on every evaluation.
@@ -276,7 +276,15 @@ func (e *evaluator) recipients(ctx context.Context, monitorID int64) []string {
 	return alert.Recipients(to, e.defaultTo)
 }
 
-func (e *evaluator) notify(ctx context.Context, ev alert.Event) {
+// notify sends an event to all notifiers, unless the monitor is muted
+// (maintenance), in which case the alert is suppressed.
+func (e *evaluator) notify(ctx context.Context, monitorID int64, ev alert.Event) {
+	if muted, err := e.st.IsMuted(ctx, monitorID); err != nil {
+		log.Printf("[%s] mute check: %v", ev.Monitor, err)
+	} else if muted {
+		log.Printf("[%s] %s alert suppressed (muted)", ev.Monitor, ev.Kind)
+		return
+	}
 	for _, n := range e.notifiers {
 		if err := n.Send(ctx, ev); err != nil {
 			log.Printf("[%s] alert: %v", ev.Monitor, err)
