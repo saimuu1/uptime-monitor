@@ -38,6 +38,7 @@ type row struct {
 	Cert      string // "SSL 87d" etc., empty if unknown
 	CertWarn  bool   // cert expiring soon
 	Latency   string // "45 / 120 ms" (median / p95), empty if no data
+	Muted     bool   // alerts currently muted (maintenance)
 }
 
 type page struct {
@@ -133,6 +134,33 @@ func main() {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 
+	// Mute a site's alerts (maintenance). hours defaults to 2; unmute clears it.
+	mux.HandleFunc("POST /monitors/mute", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
+		if err != nil {
+			http.Error(w, "bad id", http.StatusBadRequest)
+			return
+		}
+		until := time.Now().Add(time.Duration(atoiOr(r.FormValue("hours"), 2)) * time.Hour)
+		if err := st.SetMuted(r.Context(), id, userID(r.Context()), &until); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+	mux.HandleFunc("POST /monitors/unmute", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
+		if err != nil {
+			http.Error(w, "bad id", http.StatusBadRequest)
+			return
+		}
+		if err := st.SetMuted(r.Context(), id, userID(r.Context()), nil); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+
 	// Remove a site (only your own).
 	mux.HandleFunc("POST /monitors/delete", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
@@ -198,6 +226,7 @@ func buildPage(statuses []store.Status, history []store.DayUptime) page {
 		if s.P50ms != nil && s.P95ms != nil {
 			r.Latency = fmt.Sprintf("%.0f / %.0f ms", *s.P50ms, *s.P95ms)
 		}
+		r.Muted = s.MutedUntil != nil
 		p.Rows = append(p.Rows, r)
 	}
 	return p

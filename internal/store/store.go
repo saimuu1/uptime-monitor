@@ -193,6 +193,30 @@ func (s *Store) EnabledMonitors(ctx context.Context) ([]Monitor, error) {
 	return out, rows.Err()
 }
 
+// IsMuted reports whether a monitor's alerts are currently muted (maintenance).
+func (s *Store) IsMuted(ctx context.Context, monitorID int64) (bool, error) {
+	const q = `SELECT muted_until IS NOT NULL AND muted_until > now() FROM monitors WHERE id = $1`
+	var muted bool
+	err := s.pool.QueryRow(ctx, q, monitorID).Scan(&muted)
+	if err == pgx.ErrNoRows {
+		return false, nil
+	}
+	return muted, err
+}
+
+// SetMuted mutes a monitor's alerts until `until` (nil = unmute), if owned by
+// userID.
+func (s *Store) SetMuted(ctx context.Context, id, userID int64, until *time.Time) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE monitors SET muted_until = $3 WHERE id = $1 AND user_id = $2`, id, userID, until)
+	if err != nil {
+		return fmt.Errorf("set muted: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("not your monitor")
+	}
+	return nil
+}
+
 // DeleteMonitor removes a monitor and its history, but only if it belongs to
 // userID. checks has no FK, incidents does, so clear children first.
 func (s *Store) DeleteMonitor(ctx context.Context, id, userID int64) error {
@@ -303,6 +327,7 @@ type Status struct {
 	CertExpiry *time.Time // TLS cert expiry (HTTPS monitors), nil if unknown
 	P50ms      *float64   // median response time (24h, up checks), nil if none
 	P95ms      *float64   // 95th-percentile response time (24h, up checks)
+	MutedUntil *time.Time // alerts muted until this time, nil if not muted
 }
 
 // SetCertExpiry records a monitor's TLS certificate expiry (from a check).
@@ -364,12 +389,13 @@ func (s *Store) MonitorStatusesForUser(ctx context.Context, userID int64) ([]Sta
 			MAX(c.time) AS last_check,
 			m.cert_expiry,
 			percentile_cont(0.5)  WITHIN GROUP (ORDER BY c.latency_ms) FILTER (WHERE c.up) AS p50,
-			percentile_cont(0.95) WITHIN GROUP (ORDER BY c.latency_ms) FILTER (WHERE c.up) AS p95
+			percentile_cont(0.95) WITHIN GROUP (ORDER BY c.latency_ms) FILTER (WHERE c.up) AS p95,
+			CASE WHEN m.muted_until > now() THEN m.muted_until END AS muted_until
 		FROM monitors m
 		LEFT JOIN checks c
 			ON c.monitor_id = m.id AND c.time > now() - interval '24 hours'
 		WHERE m.enabled AND m.user_id = $1
-		GROUP BY m.id, m.name, m.url, m.cert_expiry
+		GROUP BY m.id, m.name, m.url, m.cert_expiry, m.muted_until
 		ORDER BY m.id`
 	rows, err := s.pool.Query(ctx, q, userID)
 	if err != nil {
@@ -381,7 +407,7 @@ func (s *Store) MonitorStatusesForUser(ctx context.Context, userID int64) ([]Sta
 	for rows.Next() {
 		var st Status
 		if err := rows.Scan(&st.ID, &st.Name, &st.URL, &st.Down,
-			&st.Uptime24h, &st.Checks24h, &st.LastCheck, &st.CertExpiry, &st.P50ms, &st.P95ms); err != nil {
+			&st.Uptime24h, &st.Checks24h, &st.LastCheck, &st.CertExpiry, &st.P50ms, &st.P95ms, &st.MutedUntil); err != nil {
 			return nil, err
 		}
 		out = append(out, st)

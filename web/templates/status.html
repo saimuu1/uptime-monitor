@@ -146,9 +146,19 @@
           </div>
           <div class="right">
             {{ if .Down }}<span class="pill down">Down</span>{{ else }}<span class="pill up">Operational</span>{{ end }}
+            {{ if .Muted }}<span class="cert" title="alerts muted for maintenance">muted</span>{{ end }}
             {{ if .Cert }}<span class="cert {{ if .CertWarn }}warn{{ end }}" title="TLS certificate expiry">{{ .Cert }}</span>{{ end }}
             {{ if .Latency }}<span class="cert" title="response time — median / 95th percentile (24h)">{{ .Latency }}</span>{{ end }}
             <span class="stat"><b>{{ .UptimePct }}</b> · {{ .LastCheck }}</span>
+            {{ if .Muted }}
+            <form class="rmform" method="POST" action="/monitors/unmute" title="resume alerts">
+              <input type="hidden" name="id" value="{{ .ID }}"><button class="rm" type="submit">unmute</button>
+            </form>
+            {{ else }}
+            <form class="rmform" method="POST" action="/monitors/mute" title="mute alerts for 2h (maintenance)">
+              <input type="hidden" name="id" value="{{ .ID }}"><button class="rm" type="submit">mute</button>
+            </form>
+            {{ end }}
             <form class="rmform" method="POST" action="/monitors/delete" onsubmit="return confirm('Remove {{ .Name }}?')">
               <input type="hidden" name="id" value="{{ .ID }}">
               <button class="rm" type="submit" title="Remove">✕</button>
