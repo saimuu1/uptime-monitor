@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Bootstrap an Oracle Cloud (or any Ubuntu) VM to run the uptime monitor.
+# Bootstrap any Ubuntu VM (Azure, Oracle, GCP, AWS, ...) to run the uptime monitor.
 # Run it on the VM as the default user:
-#   curl -fsSL https://raw.githubusercontent.com/saimuu1/uptime-monitor/main/deploy/oracle-setup.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/saimuu1/uptime-monitor/main/deploy/vm-setup.sh | bash
 # (requires the repo to be public; otherwise git clone it yourself first)
 set -euo pipefail
 

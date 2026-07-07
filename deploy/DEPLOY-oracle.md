@@ -30,7 +30,7 @@ SSH in: `ssh ubuntu@<public-ip>` (user is `ubuntu` for Ubuntu images). Then:
 
 ```bash
 # one-shot bootstrap: installs Docker, opens the OS firewall, clones the repo
-curl -fsSL https://raw.githubusercontent.com/saimuu1/uptime-monitor/main/deploy/oracle-setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/saimuu1/uptime-monitor/main/deploy/vm-setup.sh | bash
 cd ~/uptime-monitor
 
 # secrets: your page login + (optional) email
