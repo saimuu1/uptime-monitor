@@ -35,7 +35,7 @@ cd ~/uptime-monitor
 
 # secrets: your page login + (optional) email
 cp deploy/.env.example deploy/.env
-nano deploy/.env          # set WEB_USER, WEB_PASS, and SMTP_* for email
+nano deploy/.env          # set SMTP_* for email (you sign up for a login on the page)
 
 # launch (builds images the first time, ~a few minutes)
 sudo docker compose -f deploy/docker-compose.yml up -d --build
