@@ -1,64 +1,92 @@
-# Uptime Monitor
+<h1 align="center">Uptime Monitor</h1>
 
-A self-hosted service that watches your websites/APIs, records whether they're up
-and how long they take, and detects when they go down or recover.
+<p align="center">
+  <em>Watches your websites so you don't have to — and the moment one goes down, it tells you.</em>
+</p>
 
-This repo follows the milestone plan in [`PLAN.md`](PLAN.md). **Current milestone:
-v4 — every service ships as a tiny container, the whole system runs from one
-`docker compose up`, CI tests every push, and Terraform can stand the whole thing
-up on DigitalOcean across real regions.**
+<p align="center">
+  <img alt="Go" src="https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white">
+  <img alt="Postgres" src="https://img.shields.io/badge/TimescaleDB-Postgres-4169E1?logo=postgresql&logoColor=white">
+  <img alt="NATS" src="https://img.shields.io/badge/NATS-queue-27AAE1">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white">
+  <img alt="Terraform" src="https://img.shields.io/badge/Terraform-IaC-7B42BC?logo=terraform&logoColor=white">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
+</p>
+
+<p align="center">
+  <img src="docs/status-page.svg" alt="Uptime Monitor status page — live up/down, uptime history, SSL and latency" width="760">
+</p>
+
+---
+
+Ever refreshed your own site at 2 a.m. wondering if it's still alive? I got tired
+of *being the monitoring system* — so I built one.
+
+**Uptime Monitor** is a self-hosted service that pings your websites and APIs on a
+schedule, from multiple regions, and emails you the instant one actually goes
+down — then again when it recovers. It's the kind of tool companies pay for
+(Pingdom, UptimeRobot, Better Uptime)… built from scratch, in Go, to learn how
+real distributed systems are put together.
+
+I started with a 40-line script and grew it, one hard concept at a time, into a
+multi-user product with accounts, a live status page, and infrastructure-as-code.
+This repo is that whole journey — in 24 small, readable commits.
+
+## What it does
+
+- 🔔 **Tells you when your site breaks** — a clean email on `DOWN`, another on `RECOVERED`, with exactly how long it was out.
+- 🗳️ **Doesn't cry wolf** — checks from several regions and only alarms when a *majority agree* the site is down, and only after it *stays* down (flap suppression). One bad network path won't wake you at 3 a.m.
+- 🌍 **Add any site from the web page** — type a URL, hit add, and it's watched within seconds. No config files.
+- 👤 **Multi-user** — sign up, log in, and manage only *your* sites; alerts go to *their* owner.
+- 📊 **A real status page** — live up/down, 90-day uptime history bars, and p50/p95 response times.
+- 🔒 **Catches sneaky failures** — warns before an SSL certificate expires, alerts when a site is merely *slow*, and can require a page to contain expected text ("200 OK but the page is broken").
+- 🛠️ **Maintenance mode** — mute a monitor during planned downtime so it doesn't page you.
 
 ## Architecture
 
-**v1 (all-in-one, still available as `cmd/monitor`):** one process, one goroutine
-+ ticker per monitor, checking → storing → evaluating in-line.
+The interesting part: it isn't one program. A **scheduler** decides *what* to
+check and drops jobs on a **NATS** queue; a pool of **checkers** (one per region)
+pull those jobs and do the actual pinging; and a single **evaluator** collects the
+results, runs the consensus + flap logic, stores everything, and fires alerts. A
+separate **web** service serves the status page and accounts. You can run as many
+checkers as you like, and killing one doesn't stop monitoring.
 
-**v2 (the split):**
-
-```
-                    ┌──────────────┐
-   reads monitors ─▶│  scheduler   │  one ticker per monitor
-                    └──────┬───────┘
-                           │ publish CheckJob
-                    NATS  checks.request  (queue group "checkers")
-                           │
-              ┌────────────┼────────────┐   each job → exactly one checker
-              ▼            ▼             ▼
-        ┌─────────┐  ┌─────────┐   ┌─────────┐   stateless, no DB,
-        │checker A│  │checker B│ … │checker N│   run as many as you want
-        └────┬────┘  └────┬────┘   └────┬────┘
-             └───────── publish CheckResult ─────────┐
-                    NATS  checks.result              │
-                           │                         ▼
-                    ┌──────────────┐   writes `checks`, owns incident state,
-                    │  evaluator   │   logs DOWN / RECOVERED (single instance)
-                    └──────────────┘
+```mermaid
+flowchart LR
+    U([You]) -->|add sites, log in| W[web<br/>status page + accounts]
+    S[scheduler<br/>owns the list] -->|check jobs| Q(("NATS queue"))
+    Q --> C1[checker · east]
+    Q --> C2[checker · west]
+    Q --> C3[checker · …]
+    C1 -->|results| Q
+    C2 -->|results| Q
+    C3 -->|results| Q
+    Q --> E[evaluator<br/>consensus · incidents · alerts]
+    E --> DB[("TimescaleDB")]
+    W --> DB
+    E -->|DOWN / RECOVERED| M[["📧 email · webhook"]]
 ```
 
-Shared message types live in `internal/message`. Checkers join the `checkers`
-NATS **queue group**, so each job is delivered to exactly one of them — that's the
-load balancing and the failover. TimescaleDB (Postgres + the timescaledb
-extension) backs both the relational tables (`monitors`, `incidents`) and the
-time-series `checks` hypertable.
+Every service is a ~20 MB container built from one multi-stage Dockerfile, and the
+whole system comes up with a single `docker compose up`.
 
-**v3 adds, all inside the evaluator (`internal/evaluate.Monitor`):**
+## Tech stack
 
-- **Consensus** — each region's latest result is a vote. A monitor is down only
-  on a *strict majority* of fresh regions reporting down; ties stay up. A region
-  whose checker died stops voting once its last sample goes stale
-  (`CONSENSUS_FRESHNESS`), so it can't cause a false alarm.
-- **Flap suppression** — a new consensus must hold for `CONSENSUS_STABILITY`
-  before it's committed, so a brief blip never opens an incident.
-- **Alerts** (`internal/alert`) — on committed DOWN/RECOVERED, POST to a
-  Discord/Slack webhook (`ALERT_WEBHOOK_URL`; unset = log only).
-- **Status page** (`cmd/web` + `web/`) — current state + 24h uptime per monitor.
-
-The engine is pure (time is injected), so consensus and flapping are unit-tested
-without a clock or network — see `internal/evaluate/evaluate_test.go`.
+| Concern | Choice | Why |
+|---|---|---|
+| Language | **Go** | Goroutines map perfectly onto "run many checks at once" |
+| Time-series + relational DB | **TimescaleDB** (Postgres) | One engine for both config and the flood of check results |
+| Message queue | **NATS** | Decouples scheduling from checking; load-balances via queue groups |
+| Migrations | **goose** (embedded) | Plain SQL, applied automatically on boot |
+| Auth | **bcrypt + session cookies** | Real accounts, no passwords stored in the clear |
+| Containers | **Docker Compose** | The whole stack, one command |
+| Infra-as-code | **Terraform** | Multi-region deploy to the cloud, defined in code |
+| Observability | **Prometheus + Grafana** | Metrics and dashboards for the monitor itself |
+| CI | **GitHub Actions** | `gofmt`, `go vet`, race tests, and image builds on every push |
 
 ## Quickstart (just try it)
 
-Only needs **Docker**. From a fresh clone:
+Only needs **Docker**:
 
 ```bash
 git clone https://github.com/saimuu1/uptime-monitor
@@ -66,191 +94,67 @@ cd uptime-monitor
 docker compose -f deploy/docker-compose.yml up --build
 ```
 
-Then open **http://localhost:8090**. That one command builds and runs the whole
-system — database, queue, scheduler, two regional checkers, evaluator, and the web
-page (each a ~20MB container). It ships watching `example.com`; **add your own
-sites right on the page** (URL + email → Add) and they start getting checked
-within ~15s. No config files, no Go toolchain needed.
+Open **http://localhost:8090**, sign up, and add your sites. That one command
+builds and runs the entire system. To get email alerts, copy `deploy/.env.example`
+to `deploy/.env` and fill in a Gmail app password. Optional dashboards:
+`--profile observability` (Grafana on :3000).
 
-Stop it with `Ctrl-C`, or `docker compose -f deploy/docker-compose.yml down`
-(add `-v` to also wipe the saved data).
+Deploying it 24/7 to the cloud is a one-command Terraform apply or a single VM —
+see [`deploy/`](deploy/).
 
-To get **email alerts**, see [Email alerts](#email-alerts-per-monitor-recipients)
-below. Optional monitoring dashboards: add `--profile observability` to the up
-command (Grafana on :3000, Prometheus on :9090).
+## How the clever bit works: consensus + flap suppression
 
-## Running it the hands-on way (for development)
+The heart of the project is a small, **pure** state machine
+([`internal/evaluate`](internal/evaluate/evaluate.go)) — time is passed in, so it's
+unit-tested without a clock, a network, or a database:
 
-Prefer to run the pieces yourself? You'll need **Go 1.22+**, **Docker**, and
-[`goose`](https://github.com/pressly/goose)
-(`go install github.com/pressly/goose/v3/cmd/goose@latest`).
+- Each region's latest result is a **vote**. A monitor is "down" only when a
+  *strict majority* of fresh regions agree; ties stay up. A region whose checker
+  died stops voting once its sample goes stale — so it can never cause a false alarm.
+- A new state must **hold for a stability window** before it's committed, so a
+  one-second blip never opens an incident.
 
-```bash
-# 1. Start just the infrastructure (Postgres on host 5433, NATS on 4222)
-docker compose -f deploy/docker-compose.yml up -d db nats
+That single design decision — treating the decision logic as a pure function — is
+why the trickiest behavior in the whole system is also the easiest to test.
 
-# 2. Migrate
-export DATABASE_URL="postgres://uptime:uptime@localhost:5433/uptime?sslmode=disable"
-goose -dir migrations postgres "$DATABASE_URL" up
+## What I learned building it
 
-# 3. Seed some sites (optional — you can also add them from the web page)
-cp config.example.yaml config.yaml
+- **Distributed-systems patterns for real:** a work queue with load-balancing and
+  failover, splitting a monolith into services, and why "check from many places and
+  vote" beats "check once and panic."
+- **Designing for testability:** pushing the hard logic into pure functions
+  (consensus, flap suppression, state transitions) so it's provable in milliseconds.
+- **The full stack:** from goroutines and SQL up through auth, sessions, and a
+  self-serve web UI — plus the ops side: Docker, CI, Terraform, and Prometheus.
+- **Multi-tenancy:** the surprisingly deep changes needed to go from "one shared
+  page" to "every user owns their own data."
 
-# 4a. Run the all-in-one v1 process...
-go run ./cmd/monitor
-
-# 4b. ...or the split services, in separate terminals:
-go run ./cmd/evaluator
-REGION=east go run ./cmd/checker      # run as many regions as you like
-REGION=west go run ./cmd/checker
-go run ./cmd/scheduler
-go run ./cmd/web                       # status page at http://localhost:8090
-```
-
-Knobs (all optional, with defaults): `REGION` (`local`) tags a checker's results;
-`NATS_URL` (`nats://127.0.0.1:4222`); `ALERT_WEBHOOK_URL` (unset = log only);
-`CONSENSUS_FRESHNESS` (`30s`); `CONSENSUS_STABILITY` (`5s`); `WEB_ADDR` (`:8090`);
-`CONFIG_PATH` (`config.yaml`).
-
-### The full stack in one command (what Quickstart runs)
-
-```bash
-docker compose -f deploy/docker-compose.yml up --build   # everything
-docker compose -f deploy/docker-compose.yml up db nats    # just infra (for host dev)
-```
-
-Status page: http://localhost:8090. Set `ALERT_WEBHOOK_URL` in your shell to wire
-alerts. This mirrors exactly what gets deployed to the cloud.
-
-### Email alerts (per-monitor recipients)
-
-Email is **opt-in** — sending mail needs your own sending account, so it can't be
-on by default. Turning it on is two steps, and the run command doesn't change:
-
-```bash
-cp deploy/.env.example deploy/.env
-#   edit deploy/.env with your sending account (Gmail: use a 16-char App
-#   password — Google account → 2-Step Verification → App passwords)
-docker compose -f deploy/docker-compose.yml up --build   # auto-loads deploy/.env
-```
-
-That configures the **sender**, and by default **every site alerts you** (alerts
-go to `SMTP_FROM` when a monitor lists no one). So just filling in `deploy/.env`
-is enough to start getting emails. To also notify **other people** about a
-specific site, type their address in the "Add a website" form (comma-separate for
-several); to change the default inbox, set `ALERT_EMAIL_TO`.
-
-On a committed DOWN/RECOVERED the evaluator looks up that monitor's recipients
-(fresh from the DB) and emails them. Email and webhook can both be on at once;
-with neither configured, alerts are log-only. (`deploy/.env` is gitignored, so
-your credentials never get committed.)
-
-### Monitor the monitor (Prometheus + Grafana)
-
-Every service exposes `/metrics` (`internal/metrics`). Add the `observability`
-profile to also run Prometheus (scrapes them) and Grafana (graphs them):
-
-```bash
-docker compose -f deploy/docker-compose.yml --profile observability up --build
-```
-
-- Grafana: http://localhost:3000 (anonymous viewing on) → dashboard **Uptime Monitor**
-- Prometheus: http://localhost:9090
-
-Metrics: `uptime_checks_total{region,result}`, `uptime_check_latency_ms`,
-`uptime_jobs_published_total`, `uptime_results_processed_total`,
-`uptime_incidents_opened_total`, `uptime_alerts_sent_total{kind}`, and
-`uptime_monitor_up{monitor}`.
-
-### Deploy to DigitalOcean (v4)
-
-Terraform provisions a core box + one checker droplet per real region. See
-[`deploy/terraform/README.md`](deploy/terraform/README.md). Short version:
-
-```bash
-cd deploy/terraform
-cp terraform.tfvars.example terraform.tfvars   # token, ssh key, regions
-terraform init && terraform plan && terraform apply
-```
-
-⚠️ `apply` creates paid droplets (~$18/mo for three); `terraform destroy` removes
-them. Everything before `apply` is free.
-
-## CI
-
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `gofmt`, `go vet`, and
-`go test -race` on every push/PR, then builds every service image.
-[`release.yml`](.github/workflows/release.yml) pushes images to GHCR on a `v*` tag.
-
-`config.yaml` is the seed: on start its monitors are upserted (matched by `name`)
-into the DB, which is the source of truth thereafter. `DATABASE_URL` overrides the
-default connection string.
-
-## Try the outage flow
-
-```bash
-# a local target the monitor watches (config.example.yaml points at :8080)
-python3 -m http.server 8080
-```
-
-Run the monitor, then Ctrl-C the target: you'll see `MONITOR DOWN` and an
-`incidents` row open. Restart it: `MONITOR RECOVERED` and the incident resolves.
-
-## Tests
-
-```bash
-go test ./...
-```
-
-- `internal/check` — table-driven against `httptest` (200 / 500 / timeout / refused).
-- `internal/evaluate` — the state machine: consensus majority, tie handling, stale
-  regions excluded, flap suppression, and sustained-outage commit.
-- `internal/alert` — webhook payload + non-2xx handling against `httptest`.
-
-## Handy queries
-
-```sql
-SELECT * FROM incidents ORDER BY id DESC;
-SELECT name, up, count(*) FROM checks c JOIN monitors m ON m.id=c.monitor_id
-  GROUP BY name, up;
-```
-
-## Layout
+## Project layout
 
 | Path | Role |
 |---|---|
-| `cmd/monitor` | v1 all-in-one binary (still usable) |
-| `cmd/scheduler` | v2: owns monitors, publishes check jobs |
-| `cmd/checker` | v2: stateless worker, one per region |
-| `cmd/evaluator` | v2/v3: stores checks, consensus, incidents, alerts |
-| `cmd/web` | v3: status page server |
-| `cmd/migrate` | v4: apply embedded migrations, then exit |
-| `internal/config` | load YAML, upsert monitors |
-| `internal/metrics` | Prometheus counters + /metrics server |
-| `internal/check` | perform one HTTP check |
-| `internal/store` | database reads/writes (pgx) |
-| `internal/evaluate` | v1 transition + v3 consensus/flap engine |
-| `internal/alert` | webhook notifications |
-| `internal/message` | NATS subjects + job/result payloads |
-| `internal/env` | shared env-var config with defaults |
-| `web` | embedded status-page template |
-| `migrations` | goose SQL migrations (embedded for cmd/migrate) |
-| `deploy/Dockerfile` | one multi-stage build, parameterized by service |
-| `deploy/docker-compose.yml` | full stack in containers |
-| `deploy/terraform` | DigitalOcean infrastructure as code |
-| `deploy/prometheus.yml` | scrape config |
-| `deploy/grafana` | provisioned datasource + dashboard |
-| `.github/workflows` | CI (test + build) and image release |
+| `cmd/scheduler` | owns the monitor list, publishes check jobs |
+| `cmd/checker` | stateless worker, one per region |
+| `cmd/evaluator` | consensus, incidents, alerts (the brain) |
+| `cmd/web` | status page + accounts |
+| `cmd/migrate` | applies embedded DB migrations |
+| `cmd/monitor` | the original v1 all-in-one binary |
+| `internal/evaluate` | pure consensus + flap-suppression engine (well-tested) |
+| `internal/check` · `alert` · `store` · `metrics` | checking, notifications, DB, Prometheus |
+| `deploy/` | Docker, Terraform, and cloud deploy guides |
+| `migrations/` | goose SQL |
 
-## What's left
+## Roadmap
 
-All of `PLAN.md` v1–v4 is done, including Prometheus + Grafana. Remaining are the
-optional stretch goals: SSL-expiry checks, keyword checks, latency percentiles on
-the status page, maintenance windows, and on-call escalation.
+Built and working: the four core milestones (single process → queue-based workers →
+multi-region consensus + status page → containers, CI, Terraform, Prometheus),
+plus email alerts, a self-serve UI, accounts, and a set of pro features
+(uptime history, SSL-expiry warnings, incident log, keyword checks, latency
+percentiles, slow-response alerts, maintenance mode).
 
-## Stopping
+Next up: a live cloud deployment, and hardening for public use (password reset,
+rate limiting).
 
-```bash
-docker compose -f deploy/docker-compose.yml down       # keep data
-docker compose -f deploy/docker-compose.yml down -v     # wipe the volume too
-```
+## License
+
+MIT — see [LICENSE](LICENSE).

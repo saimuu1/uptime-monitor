@@ -1,0 +1,75 @@
+<svg width="900" height="560" viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <clipPath id="win"><rect x="0" y="0" width="900" height="560" rx="12"/></clipPath>
+  </defs>
+  <g clip-path="url(#win)">
+    <rect width="900" height="560" fill="#0e1013"/>
+
+    <!-- browser chrome -->
+    <rect width="900" height="42" fill="#16191e"/>
+    <circle cx="24" cy="21" r="6" fill="#f2686a"/>
+    <circle cx="44" cy="21" r="6" fill="#e0a92e"/>
+    <circle cx="64" cy="21" r="6" fill="#3ecf8e"/>
+    <rect x="96" y="11" width="330" height="22" rx="11" fill="#0e1013"/>
+    <text x="112" y="26" fill="#9aa2ad" font-size="12">localhost:8090</text>
+    <line x1="0" y1="42" x2="900" y2="42" stroke="#262b31"/>
+
+    <!-- header -->
+    <rect x="64" y="66" width="26" height="26" rx="8" fill="#6c96ff"/>
+    <text x="77" y="84" fill="#ffffff" font-size="14" text-anchor="middle">◒</text>
+    <text x="100" y="85" fill="#e8eaed" font-size="18" font-weight="600">Uptime Monitor</text>
+    <text x="836" y="80" fill="#9aa2ad" font-size="12" text-anchor="end">you@email.com</text>
+    <rect x="770" y="88" width="66" height="24" rx="8" fill="none" stroke="#262b31"/>
+    <text x="803" y="104" fill="#9aa2ad" font-size="12" text-anchor="middle">Log out</text>
+
+    <!-- operational banner -->
+    <rect x="64" y="126" width="772" height="60" rx="14" fill="#13291f" stroke="#1c4d38"/>
+    <circle cx="94" cy="156" r="7" fill="#3ecf8e"/>
+    <text x="116" y="152" fill="#3ecf8e" font-size="17" font-weight="600">All systems operational</text>
+    <text x="116" y="172" fill="#9aa2ad" font-size="13">3 of 3 monitors up</text>
+
+    <!-- add form -->
+    <rect x="64" y="202" width="772" height="52" rx="12" fill="#16191e" stroke="#262b31"/>
+    <rect x="80" y="216" width="300" height="24" rx="8" fill="#0e1013"/>
+    <text x="92" y="232" fill="#6b7280" font-size="12">https://your-site.com</text>
+    <rect x="392" y="216" width="200" height="24" rx="8" fill="#0e1013"/>
+    <text x="404" y="232" fill="#6b7280" font-size="12">you@email.com</text>
+    <rect x="758" y="214" width="62" height="28" rx="8" fill="#6c96ff"/>
+    <text x="789" y="232" fill="#ffffff" font-size="13" font-weight="600" text-anchor="middle">Add</text>
+
+    <!-- card 1: My store -->
+    <g transform="translate(64,272)">
+      <rect width="772" height="86" rx="14" fill="#16191e" stroke="#262b31"/>
+      <circle cx="26" cy="30" r="6" fill="#3ecf8e"/>
+      <text x="46" y="27" fill="#e8eaed" font-size="15" font-weight="600">My store</text>
+      <text x="46" y="45" fill="#9aa2ad" font-size="12">https://mystore.com</text>
+      <text x="566" y="27" fill="#3ecf8e" font-size="12" font-weight="600">Operational</text>
+      <rect x="632" y="16" width="52" height="18" rx="9" fill="none" stroke="#262b31"/>
+      <text x="658" y="29" fill="#9aa2ad" font-size="11" text-anchor="middle">SSL 63d</text>
+      <text x="756" y="29" fill="#9aa2ad" font-size="12" text-anchor="end">45 / 120 ms</text>
+      <text x="756" y="45" fill="#9aa2ad" font-size="12" text-anchor="end">100.00% · 4s ago</text>
+      <!-- bar strip -->
+      <g transform="translate(20,58)">
+        <rect x="0"   width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="10"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="20"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="30"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="40"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="50"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="60"  width="8" height="18" rx="2" fill="#e0a92e"/><rect x="70"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="80"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="90"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="100" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="110" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="120" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="130" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="140" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="150" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="160" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="170" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="180" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="190" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="200" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="210" width="8" height="18" rx="2" fill="#3ecf8e"/>
+      </g>
+    </g>
+
+    <!-- card 2: Checkout API (down) -->
+    <g transform="translate(64,370)">
+      <rect width="772" height="86" rx="14" fill="#16191e" stroke="#262b31"/>
+      <circle cx="26" cy="30" r="6" fill="#3ecf8e"/>
+      <text x="46" y="27" fill="#e8eaed" font-size="15" font-weight="600">Checkout API</text>
+      <text x="46" y="45" fill="#9aa2ad" font-size="12">https://api.mystore.com/health</text>
+      <text x="566" y="27" fill="#3ecf8e" font-size="12" font-weight="600">Operational</text>
+      <rect x="632" y="16" width="52" height="18" rx="9" fill="none" stroke="#262b31"/>
+      <text x="658" y="29" fill="#9aa2ad" font-size="11" text-anchor="middle">SSL 88d</text>
+      <text x="756" y="29" fill="#9aa2ad" font-size="12" text-anchor="end">80 / 210 ms</text>
+      <text x="756" y="45" fill="#9aa2ad" font-size="12" text-anchor="end">98.10% · 2s ago</text>
+      <g transform="translate(20,58)">
+        <rect x="0"   width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="10"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="20"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="30"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="40"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="50"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="60"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="70"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="80"  width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="90"  width="8" height="18" rx="2" fill="#e0a92e"/><rect x="100" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="110" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="120" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="130" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="140" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="150" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="160" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="170" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="180" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="190" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="200" width="8" height="18" rx="2" fill="#3ecf8e"/><rect x="210" width="8" height="18" rx="2" fill="#3ecf8e"/>
+      </g>
+    </g>
+
+    <text x="450" y="500" fill="#6b7280" font-size="12" text-anchor="middle">Checked from multiple regions · alerts on confirmed outages · incident history →</text>
+  </g>
+</svg>
