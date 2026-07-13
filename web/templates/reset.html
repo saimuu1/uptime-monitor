@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Log in · Uptime Monitor</title>
+  <title>Set a new password · Uptime Monitor</title>
   <style>
     :root { --bg:#f6f7f9; --card:#fff; --text:#14171a; --muted:#6b7280; --border:#e6e8eb; --accent:#2f6bff; --down:#d63b3b; }
     @media (prefers-color-scheme: dark) { :root { --bg:#0e1013; --card:#16191e; --text:#e8eaed; --muted:#9aa2ad; --border:#262b31; --accent:#6c96ff; --down:#f2686a; } }
@@ -18,28 +18,27 @@
     input { width:100%; height:40px; padding:0 12px; border:1px solid var(--border); border-radius:10px; background:var(--bg); color:var(--text); font:inherit; }
     button { width:100%; height:42px; margin-top:18px; border:none; border-radius:10px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
     .err { background:#fdecec; color:var(--down); border:1px solid var(--down); border-radius:8px; padding:9px 12px; font-size:13px; margin-bottom:6px; }
-    .ok { background:#e7f6ee; color:#17915a; border:1px solid #17915a; border-radius:8px; padding:9px 12px; font-size:13px; margin-bottom:6px; }
     .alt { text-align:center; margin-top:16px; font-size:13px; color:var(--muted); }
     .alt a { color:var(--accent); text-decoration:none; }
-    .forgot { text-align:right; margin-top:8px; }
-    .forgot a { color:var(--muted); text-decoration:none; font-size:12px; }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="brand"><span class="logo">◒</span> Uptime Monitor</div>
-    <div class="sub">Log in to your monitors.</div>
-    {{ if .Notice }}<div class="ok">{{ .Notice }}</div>{{ end }}
-    {{ if .Error }}<div class="err">{{ .Error }}</div>{{ end }}
-    <form method="POST" action="/login">
-      <label>Email</label>
-      <input name="email" type="email" autocomplete="username" required autofocus>
-      <label>Password</label>
-      <input name="password" type="password" autocomplete="current-password" required>
-      <div class="forgot"><a href="/forgot">Forgot password?</a></div>
-      <button type="submit">Log in</button>
-    </form>
-    <div class="alt">No account? <a href="/signup">Sign up</a></div>
+    {{ if eq .Error "invalid" }}
+      <div class="sub">Link problem.</div>
+      <div class="err">This reset link is invalid or has expired.</div>
+      <div class="alt"><a href="/forgot">Request a new link</a></div>
+    {{ else }}
+      <div class="sub">Choose a new password.</div>
+      {{ if .Error }}<div class="err">{{ .Error }}</div>{{ end }}
+      <form method="POST" action="/reset">
+        <input type="hidden" name="token" value="{{ .Token }}">
+        <label>New password <span style="opacity:.7">(8+ characters)</span></label>
+        <input name="password" type="password" autocomplete="new-password" minlength="8" required autofocus>
+        <button type="submit">Update password</button>
+      </form>
+    {{ end }}
   </div>
 </body>
 </html>
