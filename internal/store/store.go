@@ -81,6 +81,50 @@ func (s *Store) DeleteSession(ctx context.Context, token string) error {
 	return err
 }
 
+// DeleteUserSessions logs a user out everywhere (e.g. after a password reset).
+func (s *Store) DeleteUserSessions(ctx context.Context, userID int64) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, userID)
+	return err
+}
+
+// CreatePasswordReset stores a single-use reset token for a user until expiry.
+func (s *Store) CreatePasswordReset(ctx context.Context, token string, userID int64, expires time.Time) error {
+	const q = `INSERT INTO password_resets (token, user_id, expires_at) VALUES ($1, $2, $3)`
+	_, err := s.pool.Exec(ctx, q, token, userID, expires)
+	if err != nil {
+		return fmt.Errorf("create reset: %w", err)
+	}
+	return nil
+}
+
+// UserByResetToken resolves a non-expired reset token to a user id.
+func (s *Store) UserByResetToken(ctx context.Context, token string) (userID int64, ok bool, err error) {
+	const q = `SELECT user_id FROM password_resets WHERE token = $1 AND expires_at > now()`
+	err = s.pool.QueryRow(ctx, q, token).Scan(&userID)
+	if err == pgx.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("reset token: %w", err)
+	}
+	return userID, true, nil
+}
+
+// DeletePasswordReset consumes a reset token.
+func (s *Store) DeletePasswordReset(ctx context.Context, token string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM password_resets WHERE token = $1`, token)
+	return err
+}
+
+// UpdatePassword sets a user's password hash.
+func (s *Store) UpdatePassword(ctx context.Context, userID int64, hash string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE users SET password_hash = $2 WHERE id = $1`, userID, hash)
+	if err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+	return nil
+}
+
 // Monitor is the full monitor record as persisted.
 type Monitor struct {
 	ID              int64

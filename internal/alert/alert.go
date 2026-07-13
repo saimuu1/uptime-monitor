@@ -132,24 +132,30 @@ func NewEmail(host, port, user, pass, from string) Email {
 }
 
 // Send emails the event to e's recipients. No recipients = nothing to do.
-func (m Email) Send(_ context.Context, ev Event) error {
-	if len(ev.To) == 0 {
+func (m Email) Send(ctx context.Context, ev Event) error {
+	return m.SendMessage(ctx, ev.To, ev.Subject(), ev.Message())
+}
+
+// SendMessage sends a plain-text email — used for alerts and for transactional
+// mail like password resets.
+func (m Email) SendMessage(_ context.Context, to []string, subject, body string) error {
+	if len(to) == 0 {
 		return nil
 	}
 	auth := smtp.PlainAuth("", m.User, m.Pass, m.Host)
 	addr := m.Host + ":" + m.Port
-	return smtp.SendMail(addr, auth, m.From, ev.To, buildMessage(m.From, ev))
+	return smtp.SendMail(addr, auth, m.From, to, buildMessage(m.From, to, subject, body))
 }
 
 // buildMessage renders the raw RFC 5322 message (headers + body).
-func buildMessage(from string, ev Event) []byte {
+func buildMessage(from string, to []string, subject, body string) []byte {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "From: %s\r\n", from)
-	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(ev.To, ", "))
-	fmt.Fprintf(&b, "Subject: %s\r\n", ev.Subject())
+	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(to, ", "))
+	fmt.Fprintf(&b, "Subject: %s\r\n", subject)
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	b.WriteString("\r\n")
-	b.WriteString(ev.Message())
+	b.WriteString(body)
 	b.WriteString("\r\n")
 	return b.Bytes()
 }

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/saimuu1/uptime-monitor/internal/alert"
 	"github.com/saimuu1/uptime-monitor/internal/env"
 	"github.com/saimuu1/uptime-monitor/internal/metrics"
 	"github.com/saimuu1/uptime-monitor/internal/store"
@@ -58,7 +59,13 @@ func main() {
 
 	tmpl := template.Must(template.ParseFS(web.Templates, "templates/*.html"))
 
-	a := &auth{st: st, tmpl: tmpl}
+	var mailer *alert.Email
+	if env.SMTPHost() != "" && env.SMTPUser() != "" {
+		m := alert.NewEmail(env.SMTPHost(), env.SMTPPort(), env.SMTPUser(), env.SMTPPass(), env.SMTPFrom())
+		mailer = &m
+		log.Print("web: password-reset emails enabled")
+	}
+	a := &auth{st: st, tmpl: tmpl, mailer: mailer}
 
 	mux := http.NewServeMux()
 	a.routes(mux)

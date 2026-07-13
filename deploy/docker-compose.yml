@@ -115,6 +115,11 @@ services:
     environment:
       <<: *app-env
       WEB_ADDR: ":8090"
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
     ports:
       - "8090:8090"
     depends_on:
