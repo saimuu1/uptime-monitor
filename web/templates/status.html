@@ -3,7 +3,6 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="10">
   <title>Status · Uptime Monitor</title>
   <style>
     :root {
@@ -177,5 +176,14 @@
 
     <footer>Checked from multiple regions · alerts on confirmed outages · <a href="/incidents" style="color:var(--accent);text-decoration:none;">incident history →</a></footer>
   </div>
+  <script>
+    // Auto-refresh the status every 10s, but never while you're filling in the
+    // add form (a reload would wipe what you typed).
+    setInterval(function () {
+      var a = document.activeElement;
+      if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA")) return;
+      location.reload();
+    }, 10000);
+  </script>
 </body>
 </html>
