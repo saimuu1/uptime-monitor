@@ -10,7 +10,12 @@
   <img alt="NATS" src="https://img.shields.io/badge/NATS-queue-27AAE1">
   <img alt="Docker" src="https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white">
   <img alt="Terraform" src="https://img.shields.io/badge/Terraform-IaC-7B42BC?logo=terraform&logoColor=white">
+  <img alt="Deployed" src="https://img.shields.io/badge/deployed-Google%20Cloud-4285F4?logo=googlecloud&logoColor=white">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
+</p>
+
+<p align="center">
+  <strong>Live in production on Google Cloud — monitoring real sites 24/7, with verified email alerting.</strong>
 </p>
 
 <p align="center">
@@ -29,15 +34,17 @@ down — then again when it recovers. It's the kind of tool companies pay for
 real distributed systems are put together.
 
 I started with a 40-line script and grew it, one hard concept at a time, into a
-multi-user product with accounts, a live status page, and infrastructure-as-code.
-This repo is that whole journey — in 24 small, readable commits.
+multi-user product with accounts, a live status page, and infrastructure-as-code —
+then **deployed it to Google Cloud, where it runs 24/7 and emails real alerts.**
+This repo is that whole journey, in 30 small, readable commits: from a single
+process to a fault-tolerant, containerized, production distributed system.
 
 ## What it does
 
 - 🔔 **Tells you when your site breaks** — a clean email on `DOWN`, another on `RECOVERED`, with exactly how long it was out.
 - 🗳️ **Doesn't cry wolf** — checks from several regions and only alarms when a *majority agree* the site is down, and only after it *stays* down (flap suppression). One bad network path won't wake you at 3 a.m.
 - 🌍 **Add any site from the web page** — type a URL, hit add, and it's watched within seconds. No config files.
-- 👤 **Multi-user** — sign up, log in, and manage only *your* sites; alerts go to *their* owner.
+- 👤 **Multi-user** — secure sign-up/login (bcrypt + sessions), email-based password reset, and strict per-user data isolation; each site alerts *its* owner.
 - 📊 **A real status page** — live up/down, 90-day uptime history bars, and p50/p95 response times.
 - 🔒 **Catches sneaky failures** — warns before an SSL certificate expires, alerts when a site is merely *slow*, and can require a page to contain expected text ("200 OK but the page is broken").
 - 🛠️ **Maintenance mode** — mute a monitor during planned downtime so it doesn't page you.
@@ -128,6 +135,9 @@ why the trickiest behavior in the whole system is also the easiest to test.
   self-serve web UI — plus the ops side: Docker, CI, Terraform, and Prometheus.
 - **Multi-tenancy:** the surprisingly deep changes needed to go from "one shared
   page" to "every user owns their own data."
+- **Shipping to production:** provisioning a cloud VM, opening firewalls, taming
+  a memory-constrained build with swap, and running the redeploy loop
+  (`git pull` → rebuild) — the difference between "works on my machine" and *live*.
 
 ## Project layout
 
@@ -144,16 +154,23 @@ why the trickiest behavior in the whole system is also the easiest to test.
 | `deploy/` | Docker, Terraform, and cloud deploy guides |
 | `migrations/` | goose SQL |
 
-## Roadmap
+## The journey
 
-Built and working: the four core milestones (single process → queue-based workers →
-multi-region consensus + status page → containers, CI, Terraform, Prometheus),
-plus email alerts, a self-serve UI, accounts, and a set of pro features
-(uptime history, SSL-expiry warnings, incident log, keyword checks, latency
-percentiles, slow-response alerts, maintenance mode).
+Built as four milestones, each adding one hard concept, then extended into a real
+product and **shipped**:
 
-Next up: a live cloud deployment, and hardening for public use (password reset,
-rate limiting).
+- **v1 → v4:** single process → queue-based workers over NATS → multi-region
+  consensus + status page → containers, CI, Terraform, and Prometheus/Grafana.
+- **Product:** a self-serve web UI, multi-user accounts with password reset, and
+  email + webhook alerting.
+- **Pro features:** 90-day uptime history, SSL-expiry warnings, an incident log,
+  keyword checks, p50/p95 latency, slow-response alerts, and maintenance muting.
+- **Deployed:** running live on a Google Cloud VM, watching real sites 24/7, with
+  email alerts verified end-to-end. Ships as one `docker compose up`; see
+  [`deploy/`](deploy/) for the cloud guides and Terraform.
+
+Possible next steps: a custom domain with HTTPS, request rate-limiting, and
+GitHub-Actions auto-deploy on push.
 
 ## License
 
