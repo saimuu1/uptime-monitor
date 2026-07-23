@@ -109,6 +109,31 @@ to `deploy/.env` and fill in a Gmail app password. Optional dashboards:
 Deploying it 24/7 to the cloud is a one-command Terraform apply or a single VM —
 see [`deploy/`](deploy/).
 
+## Live deployment (Google Cloud)
+
+This project runs live on a **Google Cloud Compute Engine VM** (Ubuntu 24.04,
+`e2-small`), reachable on the public internet. Getting it there was three steps:
+
+1. **Provision** — create the VM and open port `8090` with a VPC firewall rule.
+2. **Bootstrap** — one command installs Docker, adds swap (so the Go build fits on
+   a small machine), and clones the repo:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/saimuu1/uptime-monitor/main/deploy/vm-setup.sh | bash
+   ```
+3. **Launch** — set SMTP in `deploy/.env`, then `docker compose up -d --build`.
+
+Full walkthroughs for **Google Cloud, Azure (student), and Oracle** are in
+[`deploy/`](deploy/) ([DEPLOY-azure.md](deploy/DEPLOY-azure.md),
+[DEPLOY-oracle.md](deploy/DEPLOY-oracle.md)). Ship a change to the running server
+with the standard loop:
+
+```bash
+cd ~/uptime-monitor && git pull && docker compose -f deploy/docker-compose.yml up -d --build
+```
+
+Access it at `http://<VM-external-IP>:8090` (reserve a static IP so the address is
+permanent; add a domain + Caddy/Cloudflare Tunnel for HTTPS).
+
 ## How the clever bit works: consensus + flap suppression
 
 The heart of the project is a small, **pure** state machine
