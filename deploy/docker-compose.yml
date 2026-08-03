@@ -154,5 +154,28 @@ services:
     depends_on:
       - prometheus
 
+  # HTTPS with a real domain. Start with:
+  #   DOMAIN=your-domain.com docker compose -f deploy/docker-compose.yml --profile https up -d
+  # Caddy auto-fetches a free Let's Encrypt certificate for $DOMAIN and proxies
+  # to the web service. Requires ports 80 + 443 open and DNS pointing at the VM.
+  caddy:
+    image: caddy:2-alpine
+    container_name: uptime-caddy
+    profiles: ["https"]
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+
 volumes:
   uptime-db-data:
+  caddy-data:
+  caddy-config:

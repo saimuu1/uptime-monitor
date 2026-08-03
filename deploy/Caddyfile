@@ -1,0 +1,5 @@
+# Serves your domain over HTTPS (auto Let's Encrypt cert) and proxies to the app.
+# $DOMAIN is set from the environment (docker-compose passes it through).
+{$DOMAIN} {
+	reverse_proxy web:8090
+}
