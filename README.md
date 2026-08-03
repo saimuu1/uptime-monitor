@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <strong>Live in production on Google Cloud — monitoring real sites 24/7, with verified email alerting.</strong>
+  <strong>🟢 Live demo: <a href="http://34.9.241.54:8090">34.9.241.54:8090</a></strong> — deployed on Google Cloud, running 24/7. Sign up and add a site to try it.
 </p>
 
 <p align="center">
