@@ -1,11 +1,14 @@
 package raft
 
 import (
+	"bytes"
 	"errors"
 	"math/rand"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/saimuu1/uptime-monitor/internal/raftlog"
 )
 
 // errUnreachable simulates a dropped/partitioned RPC.
@@ -167,25 +170,29 @@ func TestSingleLeaderElected(t *testing.T) {
 	_, nodes := makeCluster(t, 3)
 	startAll(nodes)
 
-	if !waitFor(3*time.Second, func() bool { return len(leaders(nodes)) == 1 }) {
-		t.Fatalf("no single leader elected; leaders=%v", leaders(nodes))
-	}
-	ls := leaders(nodes)
-	leaderTerm := ls[0].term
-
-	// The other two must be followers, and everyone must agree on the term.
-	followers := 0
-	for _, r := range nodes {
-		st, term := r.Report()
-		if st == Follower {
-			followers++
+	// Wait for a STABLE configuration: exactly one leader, the other two
+	// followers, and everyone agreeing on the leader's term. A brief transient
+	// where a third node is still mid-election is normal Raft, so we poll for the
+	// settled state rather than asserting on the first instant a leader appears.
+	stable := func() bool {
+		ls := leaders(nodes)
+		if len(ls) != 1 {
+			return false
 		}
-		if term != leaderTerm {
-			t.Fatalf("node %d term %d != leader term %d", r.id, term, leaderTerm)
+		followers := 0
+		for _, r := range nodes {
+			st, term := r.Report()
+			if st == Follower {
+				followers++
+			}
+			if term != ls[0].term {
+				return false
+			}
 		}
+		return followers == 2
 	}
-	if followers != 2 {
-		t.Fatalf("want 2 followers, got %d", followers)
+	if !waitFor(5*time.Second, stable) {
+		t.Fatalf("no stable single-leader configuration; leaders=%v", leaders(nodes))
 	}
 }
 
@@ -399,4 +406,233 @@ func TestPersistedVoteSurvivesRestart(t *testing.T) {
 	if reply := r2.HandleRequestVote(RequestVoteArgs{Term: 4, CandidateID: 3}); reply.VoteGranted {
 		t.Fatal("granted a vote for a stale term")
 	}
+}
+
+// --- Phase 2: replication + commitment ---
+
+// seedLog appends entries with the given terms directly (test-only), building a
+// specific log shape without running the node.
+func seedLog(t *testing.T, r *Raft, terms []uint64) {
+	t.Helper()
+	for i, term := range terms {
+		e := raftlog.Entry{Index: uint64(i + 1), Term: term, Type: raftlog.EntryCommand, Data: []byte{byte('a' + i)}}
+		if err := r.log.AppendEntry(e); err != nil {
+			t.Fatalf("seed entry %d: %v", i+1, err)
+		}
+	}
+}
+
+// TestAppendEntriesRepairsConflict checks the follower side of replication: the
+// consistency check, the accelerated conflict hints, and conflict truncation.
+func TestAppendEntriesRepairsConflict(t *testing.T) {
+	// Case 1: conflicting tail is truncated and replaced.
+	f, err := New(1, []NodeID{2, 3}, noopNet{}, testConfig(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Stop()
+	seedLog(t, f, []uint64{1, 1, 2}) // follower has term-2 entry at index 3
+	f.currentTerm = 2
+
+	reply := f.HandleAppendEntries(AppendEntriesArgs{
+		Term: 3, LeaderID: 2, PrevLogIndex: 2, PrevLogTerm: 1,
+		Entries: []raftlog.Entry{{Index: 3, Term: 3, Type: raftlog.EntryCommand, Data: []byte("c")}},
+	})
+	if !reply.Success {
+		t.Fatalf("expected success, got %+v", reply)
+	}
+	if e, ok := f.log.At(3); !ok || e.Term != 3 {
+		t.Fatalf("index 3 not repaired: %+v,%v", e, ok)
+	}
+	if f.log.LastIndex() != 3 {
+		t.Fatalf("LastIndex = %d, want 3", f.log.LastIndex())
+	}
+
+	// Case 2: log too short => ConflictTerm 0, ConflictIndex = our end + 1.
+	f2, _ := New(1, []NodeID{2, 3}, noopNet{}, testConfig(), t.TempDir())
+	defer f2.Stop()
+	f2.currentTerm = 1
+	rep2 := f2.HandleAppendEntries(AppendEntriesArgs{Term: 1, LeaderID: 2, PrevLogIndex: 5, PrevLogTerm: 1})
+	if rep2.Success || rep2.ConflictTerm != 0 || rep2.ConflictIndex != 1 {
+		t.Fatalf("short-log hint wrong: %+v", rep2)
+	}
+
+	// Case 3: term mismatch => ConflictTerm and first index of that term.
+	f3, _ := New(1, []NodeID{2, 3}, noopNet{}, testConfig(), t.TempDir())
+	defer f3.Stop()
+	seedLog(t, f3, []uint64{1, 1, 2})
+	f3.currentTerm = 2
+	rep3 := f3.HandleAppendEntries(AppendEntriesArgs{Term: 5, LeaderID: 2, PrevLogIndex: 3, PrevLogTerm: 5})
+	if rep3.Success || rep3.ConflictTerm != 2 || rep3.ConflictIndex != 3 {
+		t.Fatalf("term-conflict hint wrong: %+v", rep3)
+	}
+}
+
+// --- a replicated key-value state machine for the convergence test ---
+
+type kvSM struct {
+	mu sync.Mutex
+	m  map[string]string
+}
+
+func newKV() *kvSM { return &kvSM{m: map[string]string{}} }
+
+func (s *kvSM) apply(msg ApplyMsg) {
+	if msg.Type != raftlog.EntryCommand {
+		return // skip leader no-ops
+	}
+	k, v := decodePut(msg.Data)
+	s.mu.Lock()
+	s.m[k] = v
+	s.mu.Unlock()
+}
+
+func (s *kvSM) get(k string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.m[k]
+	return v, ok
+}
+
+func (s *kvSM) equalTo(exp map[string]string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.m) != len(exp) {
+		return false
+	}
+	for k, v := range exp {
+		if s.m[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func encodePut(k, v string) []byte { return []byte(k + "\x00" + v) }
+
+func decodePut(b []byte) (string, string) {
+	i := bytes.IndexByte(b, 0)
+	if i < 0 {
+		return string(b), ""
+	}
+	return string(b[:i]), string(b[i+1:])
+}
+
+func findLeader(nodes []*Raft) *Raft {
+	var best *Raft
+	var bestTerm uint64
+	for _, r := range nodes {
+		if st, term := r.Report(); st == Leader && (best == nil || term > bestTerm) {
+			best, bestTerm = r, term
+		}
+	}
+	return best
+}
+
+// TestReplicationConverges drives a replicated KV store through ~200 committed
+// writes while intermittently isolating a single node (keeping a majority, so
+// progress never stalls). At the end it heals the cluster and requires every
+// node's state machine to equal the expected map and every node's log to be
+// byte-identical — Raft's State Machine Safety property, end to end.
+func TestReplicationConverges(t *testing.T) {
+	const n, ops = 5, 200
+	_, nodes := makeCluster(t, n)
+	sms := make([]*kvSM, n)
+	smOf := map[*Raft]*kvSM{}
+	for i, r := range nodes {
+		sms[i] = newKV()
+		smOf[r] = sms[i]
+		r.SetApply(sms[i].apply)
+	}
+	hub := nodes[0].net.(*netHub)
+	startAll(nodes)
+
+	if !waitFor(3*time.Second, func() bool { return findLeader(nodes) != nil }) {
+		t.Fatal("no leader elected")
+	}
+
+	rng := rand.New(rand.NewSource(7))
+	expected := map[string]string{}
+	var isolated NodeID
+	isolatedUntil := time.Time{}
+
+	commitOnLeader := func(key, val string) bool {
+		l := findLeader(nodes)
+		if l == nil {
+			return false
+		}
+		if _, _, ok := l.Propose(encodePut(key, val)); !ok {
+			return false
+		}
+		// Wait until the proposing leader has applied it (i.e. it committed).
+		sm := smOf[l]
+		return waitFor(2*time.Second, func() bool {
+			got, ok := sm.get(key)
+			return ok && got == val
+		})
+	}
+
+	for i := 0; i < ops; i++ {
+		// Chaos: heal an expired isolation, or occasionally isolate one node.
+		if isolated != 0 && time.Now().After(isolatedUntil) {
+			hub.heal()
+			isolated = 0
+		}
+		if isolated == 0 && rng.Intn(6) == 0 {
+			isolated = NodeID(1 + rng.Intn(n))
+			hub.isolate(isolated)
+			isolatedUntil = time.Now().Add(200 * time.Millisecond)
+		}
+
+		key, val := "k"+u(uint64(i)), "v"+u(uint64(i))
+		deadline := time.Now().Add(8 * time.Second)
+		for !commitOnLeader(key, val) {
+			if time.Now().After(deadline) {
+				t.Fatalf("op %d (%s) never committed", i, key)
+			}
+			if isolated != 0 { // don't get stuck behind our own partition
+				hub.heal()
+				isolated = 0
+			}
+			time.Sleep(15 * time.Millisecond)
+		}
+		expected[key] = val
+	}
+
+	// Heal and require every node's state machine to converge to expected.
+	hub.heal()
+	converged := waitFor(10*time.Second, func() bool {
+		for _, s := range sms {
+			if !s.equalTo(expected) {
+				return false
+			}
+		}
+		return true
+	})
+	if !converged {
+		for i, s := range sms {
+			s.mu.Lock()
+			t.Logf("node %d has %d/%d keys", nodes[i].id, len(s.m), len(expected))
+			s.mu.Unlock()
+		}
+		t.Fatal("state machines did not converge to the expected map")
+	}
+
+	// Stronger: every node's committed log prefix must be byte-identical.
+	minApplied := nodes[0].LastApplied()
+	for _, r := range nodes[1:] {
+		if a := r.LastApplied(); a < minApplied {
+			minApplied = a
+		}
+	}
+	for idx := uint64(1); idx <= minApplied; idx++ {
+		want, _ := nodes[0].log.At(idx)
+		for _, r := range nodes[1:] {
+			got, ok := r.log.At(idx)
+			if !ok || got.Term != want.Term || got.Type != want.Type || !bytes.Equal(got.Data, want.Data) {
+				t.Fatalf("log divergence at index %d: node1=%+v node%d=%+v", idx, want, r.id, got)
+			}
+		}
+	}
+	t.Logf("converged: %d ops applied identically across %d nodes", len(expected), n)
 }
