@@ -36,8 +36,10 @@ real distributed systems are put together.
 I started with a 40-line script and grew it, one hard concept at a time, into a
 multi-user product with accounts, a live status page, and infrastructure-as-code —
 then **deployed it to Google Cloud, where it runs 24/7 and emails real alerts.**
-This repo is that whole journey, in 30 small, readable commits: from a single
-process to a fault-tolerant, containerized, production distributed system.
+This repo is that whole journey, in small, numbered commits: from a single
+process to a containerized, multi-region, production distributed system — and,
+most recently, a from-scratch Raft consensus engine built to remove its last
+single points of failure (see below).
 
 ## What it does
 
@@ -164,6 +166,41 @@ why the trickiest behavior in the whole system is also the easiest to test.
   a memory-constrained build with swap, and running the redeploy loop
   (`git pull` → rebuild) — the difference between "works on my machine" and *live*.
 
+## Going deeper: a Raft consensus engine, from scratch
+
+The running system has one honest weak point: the **evaluator is a single
+process** holding authoritative state, and check delivery rides on **core NATS**
+(at-most-once — a dropped message is simply lost). Making the "fault-tolerant"
+story literally true means *owning* the hard part — replicated consensus —
+instead of delegating it to a library.
+
+So [`internal/raft`](internal/raft) and [`internal/raftlog`](internal/raftlog)
+are a **from-scratch implementation of the Raft consensus algorithm** — no
+third-party consensus library. It's built and tested as a **standalone engine
+that is not yet wired into the running services**; integrating it is what will
+retire NATS and remove the single points of failure.
+
+What's implemented and verified under fault injection:
+
+- **Crash-safe log** — append-only records with fsync-per-append, torn-tail
+  recovery on restart, and atomic persistence of the term/vote a node must never
+  forget.
+- **Leader election** — the up-to-date-log election restriction, term step-down,
+  randomized timeouts; an in-memory network harness that injects partitions
+  asserts *never two leaders in one term* across thousands of samples.
+- **Log replication + commitment** — the `prevLogIndex`/`prevLogTerm` consistency
+  check with accelerated conflict backtracking, and the Figure-8 commit rule
+  (advance the commit index by replica-count only for current-term entries). A
+  5-node replicated key-value store stays **byte-identical across all nodes**
+  through 200 writes while nodes are repeatedly partitioned.
+- **Snapshotting + compaction** — crash-safe log compaction and an
+  `InstallSnapshot` path; a follower isolated until the leader compacts past it is
+  caught up from a snapshot and converges.
+
+The entire suite runs clean under Go's race detector. Next steps for this track:
+a replicated **work queue** (at-least-once delivery) to replace NATS, then a
+**replicated evaluator** so the brain is no longer a single point of failure.
+
 ## Project layout
 
 | Path | Role |
@@ -176,6 +213,7 @@ why the trickiest behavior in the whole system is also the easiest to test.
 | `cmd/monitor` | the original v1 all-in-one binary |
 | `internal/evaluate` | pure consensus + flap-suppression engine (well-tested) |
 | `internal/check` · `alert` · `store` · `metrics` | checking, notifications, DB, Prometheus |
+| `internal/raft` · `raftlog` | from-scratch Raft consensus engine — standalone & tested, **not yet integrated** |
 | `deploy/` | Docker, Terraform, and cloud deploy guides |
 | `migrations/` | goose SQL |
 
@@ -194,8 +232,10 @@ product and **shipped**:
   email alerts verified end-to-end. Ships as one `docker compose up`; see
   [`deploy/`](deploy/) for the cloud guides and Terraform.
 
-Possible next steps: a custom domain with HTTPS, request rate-limiting, and
-GitHub-Actions auto-deploy on push.
+- **In progress:** wiring in the from-scratch **Raft engine** (above) to replace
+  NATS with at-least-once delivery and make the evaluator fault-tolerant. Other
+  next steps: a custom domain with HTTPS, request rate-limiting, and
+  GitHub-Actions auto-deploy on push.
 
 ## License
 
