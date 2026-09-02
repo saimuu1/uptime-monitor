@@ -59,6 +59,14 @@ func (h *netHub) SendAppendEntries(from, to NodeID, args AppendEntriesArgs) (App
 	return node.HandleAppendEntries(args), nil
 }
 
+func (h *netHub) SendInstallSnapshot(from, to NodeID, args InstallSnapshotArgs) (InstallSnapshotReply, error) {
+	node, ok := h.route(from, to)
+	if !ok {
+		return InstallSnapshotReply{}, errUnreachable
+	}
+	return node.HandleInstallSnapshot(args), nil
+}
+
 func (h *netHub) heal() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -368,6 +376,9 @@ func (noopNet) SendRequestVote(NodeID, NodeID, RequestVoteArgs) (RequestVoteRepl
 func (noopNet) SendAppendEntries(NodeID, NodeID, AppendEntriesArgs) (AppendEntriesReply, error) {
 	return AppendEntriesReply{}, errUnreachable
 }
+func (noopNet) SendInstallSnapshot(NodeID, NodeID, InstallSnapshotArgs) (InstallSnapshotReply, error) {
+	return InstallSnapshotReply{}, errUnreachable
+}
 
 // TestPersistedVoteSurvivesRestart proves currentTerm and votedFor are durable:
 // after a node votes in term 5 and is recreated from the same directory, it must
@@ -635,4 +646,109 @@ func TestReplicationConverges(t *testing.T) {
 		}
 	}
 	t.Logf("converged: %d ops applied identically across %d nodes", len(expected), n)
+}
+
+// --- Phase 3: snapshotting + log compaction ---
+
+func (s *kvSM) serialize() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var b bytes.Buffer
+	for k, v := range s.m {
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(v)
+		b.WriteByte('\n')
+	}
+	return b.Bytes()
+}
+
+func (s *kvSM) restore(data []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m := map[string]string{}
+	for _, line := range bytes.Split(data, []byte{'\n'}) {
+		if len(line) == 0 {
+			continue
+		}
+		if i := bytes.IndexByte(line, '='); i >= 0 {
+			m[string(line[:i])] = string(line[i+1:])
+		}
+	}
+	s.m = m
+}
+
+func (s *kvSM) size() int { s.mu.Lock(); defer s.mu.Unlock(); return len(s.m) }
+
+// TestSnapshotCatchUp isolates a follower while the majority commits enough
+// writes that the leader compacts its log past the follower's position. When the
+// follower rejoins, the entries it needs are gone, so the leader must catch it up
+// with an InstallSnapshot; the follower restores its state machine from the
+// snapshot and converges.
+func TestSnapshotCatchUp(t *testing.T) {
+	const n = 3
+	hub, nodes := makeCluster(t, n)
+	sms := make([]*kvSM, n)
+	smOf := map[*Raft]*kvSM{}
+	for i, r := range nodes {
+		sms[i] = newKV()
+		smOf[r] = sms[i]
+		r.SetApply(sms[i].apply)
+		r.SetSnapshot(sms[i].serialize, sms[i].restore, 10) // compact every 10 entries
+	}
+	startAll(nodes)
+
+	if !waitFor(3*time.Second, func() bool { return findLeader(nodes) != nil }) {
+		t.Fatal("no leader")
+	}
+	leader := findLeader(nodes)
+
+	// Isolate a follower.
+	var victim *Raft
+	for _, r := range nodes {
+		if r != leader {
+			victim = r
+			break
+		}
+	}
+	hub.isolate(victim.id)
+
+	// Commit enough writes that the leader compacts past the victim.
+	expected := map[string]string{}
+	for i := 0; i < 60; i++ {
+		key, val := "k"+u(uint64(i)), "v"+u(uint64(i))
+		deadline := time.Now().Add(8 * time.Second)
+		for {
+			l := findLeader(nodes)
+			if l != nil && l != victim {
+				if _, _, ok := l.Propose(encodePut(key, val)); ok {
+					sm := smOf[l]
+					if waitFor(2*time.Second, func() bool { g, ok := sm.get(key); return ok && g == val }) {
+						break
+					}
+				}
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("op %d never committed", i)
+			}
+			time.Sleep(15 * time.Millisecond)
+		}
+		expected[key] = val
+	}
+
+	if leader.log.SnapshotIndex() == 0 {
+		t.Fatal("leader never compacted its log")
+	}
+
+	// Heal the victim: it must catch up via InstallSnapshot (its needed entries
+	// were compacted away) and converge.
+	hub.heal()
+	caughtUp := waitFor(8*time.Second, func() bool {
+		return victim.log.SnapshotIndex() > 0 && smOf[victim].equalTo(expected)
+	})
+	if !caughtUp {
+		t.Fatalf("victim didn't catch up via snapshot: snapIndex=%d keys=%d/%d",
+			victim.log.SnapshotIndex(), smOf[victim].size(), len(expected))
+	}
+	t.Logf("victim caught up via snapshot to index %d (%d keys)", victim.log.SnapshotIndex(), len(expected))
 }

@@ -90,11 +90,27 @@ type AppendEntriesReply struct {
 	ConflictIndex uint64 // where the leader should resume probing
 }
 
+// InstallSnapshotArgs ships a whole snapshot to a follower that has fallen so far
+// behind the leader compacted the entries it needs. (Chunking is a production
+// concern; this sends the snapshot in one shot.)
+type InstallSnapshotArgs struct {
+	Term              uint64
+	LeaderID          NodeID
+	LastIncludedIndex uint64
+	LastIncludedTerm  uint64
+	Data              []byte
+}
+
+type InstallSnapshotReply struct {
+	Term uint64
+}
+
 // Network is the outbound transport. Tests inject an in-memory network with
 // partitions; a returned error means "not delivered".
 type Network interface {
 	SendRequestVote(from, to NodeID, args RequestVoteArgs) (RequestVoteReply, error)
 	SendAppendEntries(from, to NodeID, args AppendEntriesArgs) (AppendEntriesReply, error)
+	SendInstallSnapshot(from, to NodeID, args InstallSnapshotArgs) (InstallSnapshotReply, error)
 }
 
 // Config tunes election/heartbeat timing.
@@ -144,8 +160,11 @@ type Raft struct {
 	electionDeadline time.Time
 	closed           bool
 
-	apply   func(ApplyMsg)
-	onState func(id NodeID, state State, term uint64)
+	apply         func(ApplyMsg)
+	snapshotFn    func() []byte // serialize the state machine
+	restoreFn     func([]byte)  // load the state machine from a snapshot
+	snapThreshold uint64        // compact once this many entries pile up past the snapshot
+	onState       func(id NodeID, state State, term uint64)
 
 	stopCh chan struct{}
 	wg     sync.WaitGroup
@@ -184,6 +203,18 @@ func New(id NodeID, peers []NodeID, net Network, cfg Config, dir string) (*Raft,
 // SetApply registers the state-machine apply callback. Call before Start.
 func (r *Raft) SetApply(fn func(ApplyMsg)) { r.mu.Lock(); r.apply = fn; r.mu.Unlock() }
 
+// SetSnapshot enables log compaction: snapshot serializes the state machine,
+// restore loads it, and threshold is how many entries may pile up past the
+// current snapshot before the node compacts. threshold 0 disables compaction.
+// Call before Start.
+func (r *Raft) SetSnapshot(snapshot func() []byte, restore func([]byte), threshold uint64) {
+	r.mu.Lock()
+	r.snapshotFn = snapshot
+	r.restoreFn = restore
+	r.snapThreshold = threshold
+	r.mu.Unlock()
+}
+
 // SetOnState registers a role-change callback (tests/metrics).
 func (r *Raft) SetOnState(fn func(NodeID, State, uint64)) {
 	r.mu.Lock()
@@ -191,9 +222,20 @@ func (r *Raft) SetOnState(fn func(NodeID, State, uint64)) {
 	r.mu.Unlock()
 }
 
-// Start launches the background goroutines.
+// Start launches the background goroutines. If a snapshot exists on disk, the
+// state machine is restored from it and applied progress is seeded to the
+// snapshot boundary (so a restart never re-applies compacted entries).
 func (r *Raft) Start() {
 	r.mu.Lock()
+	if si := r.log.SnapshotIndex(); si > 0 {
+		if r.restoreFn != nil {
+			r.restoreFn(r.log.SnapshotData())
+		}
+		r.lastApplied = si
+		if r.commitIndex < si {
+			r.commitIndex = si
+		}
+	}
 	r.resetElectionTimerLocked()
 	r.mu.Unlock()
 	r.wg.Add(3)
@@ -307,13 +349,35 @@ func (r *Raft) applyLoop() {
 			return
 		}
 		r.lastApplied++
-		e, ok := r.log.At(r.lastApplied)
-		fn := r.apply
-		r.mu.Unlock()
-
-		if ok && fn != nil {
-			fn(ApplyMsg{Index: e.Index, Term: e.Term, Type: e.Type, Data: e.Data})
+		idx := r.lastApplied
+		e, ok := r.log.At(idx)
+		if ok && r.apply != nil {
+			// Applied under r.mu so it can't interleave with a snapshot restore,
+			// which also mutates the state machine. Our state machines are fast;
+			// a production system would hand this to a dedicated apply thread.
+			r.apply(ApplyMsg{Index: e.Index, Term: e.Term, Type: e.Type, Data: e.Data})
 		}
+		r.maybeSnapshotLocked(idx)
+		r.mu.Unlock()
+	}
+}
+
+// maybeSnapshotLocked compacts the log once enough entries have piled up past the
+// current snapshot. Runs in the apply loop under r.mu, so the snapshot reflects
+// exactly the entries applied so far.
+func (r *Raft) maybeSnapshotLocked(idx uint64) {
+	if r.snapshotFn == nil || r.snapThreshold == 0 {
+		return
+	}
+	if idx-r.log.SnapshotIndex() < r.snapThreshold {
+		return
+	}
+	term, ok := r.log.TermAt(idx)
+	if !ok {
+		return
+	}
+	if err := r.log.Snapshot(idx, term, r.snapshotFn()); err != nil {
+		fmt.Printf("raft %d: snapshot: %v\n", r.id, err)
 	}
 }
 
@@ -465,6 +529,12 @@ func (r *Raft) replicateTo(peer NodeID) {
 	if ni < 1 {
 		ni = 1
 	}
+	// If the follower needs entries we've already compacted away, ship the
+	// snapshot instead of an AppendEntries.
+	if si := r.log.SnapshotIndex(); ni <= si {
+		r.sendSnapshotLocked(peer, term, si)
+		return
+	}
 	prevIndex := ni - 1
 	prevTerm, _ := r.log.TermAt(prevIndex)
 	entries := r.log.From(ni)
@@ -510,6 +580,41 @@ func (r *Raft) replicateTo(peer NodeID) {
 	} else {
 		r.nextIndex[peer] = maxU(1, reply.ConflictIndex)
 	}
+}
+
+// sendSnapshotLocked ships the current snapshot to a lagging follower. It is
+// called with r.mu held, releases the lock to make the RPC, and returns with the
+// lock released. On success the follower is known to hold everything through the
+// snapshot's last-included index.
+func (r *Raft) sendSnapshotLocked(peer NodeID, term, si uint64) {
+	args := InstallSnapshotArgs{
+		Term:              term,
+		LeaderID:          r.id,
+		LastIncludedIndex: si,
+		LastIncludedTerm:  r.log.SnapshotTerm(),
+		Data:              r.log.SnapshotData(),
+	}
+	r.mu.Unlock()
+
+	reply, err := r.net.SendInstallSnapshot(r.id, peer, args)
+	if err != nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.currentTerm != term || r.state != Leader {
+		return
+	}
+	if reply.Term > r.currentTerm {
+		r.becomeFollowerLocked(reply.Term)
+		r.resetElectionTimerLocked()
+		return
+	}
+	if si > r.matchIndex[peer] {
+		r.matchIndex[peer] = si
+	}
+	r.nextIndex[peer] = r.matchIndex[peer] + 1
+	r.maybeAdvanceCommitLocked()
 }
 
 // maybeAdvanceCommitLocked advances commitIndex to the highest N such that a
@@ -614,6 +719,12 @@ func (r *Raft) HandleAppendEntries(args AppendEntriesArgs) AppendEntriesReply {
 	r.leaderID = args.LeaderID
 	r.resetElectionTimerLocked()
 
+	// Anything at or below our snapshot is already committed; if the leader
+	// probes below it, tell it to resume just above the boundary.
+	if si := r.log.SnapshotIndex(); args.PrevLogIndex < si {
+		return AppendEntriesReply{Term: r.currentTerm, Success: false, ConflictIndex: si + 1}
+	}
+
 	last := r.log.LastIndex()
 
 	// Consistency check at PrevLogIndex.
@@ -664,6 +775,47 @@ func (r *Raft) HandleAppendEntries(args AppendEntriesArgs) AppendEntriesReply {
 		}
 	}
 	return AppendEntriesReply{Term: r.currentTerm, Success: true}
+}
+
+// HandleInstallSnapshot applies a snapshot from the leader: it enforces the term
+// rules, hands the snapshot to raftlog (which compacts or reseeds the log),
+// restores the state machine, and fast-forwards applied/commit progress. The
+// restore runs under r.mu, so it can't race the apply loop.
+func (r *Raft) HandleInstallSnapshot(args InstallSnapshotArgs) InstallSnapshotReply {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return InstallSnapshotReply{Term: r.currentTerm}
+	}
+	if args.Term < r.currentTerm {
+		return InstallSnapshotReply{Term: r.currentTerm}
+	}
+	if args.Term > r.currentTerm {
+		r.becomeFollowerLocked(args.Term)
+	} else if r.state != Follower {
+		r.state = Follower
+		r.notifyStateLocked()
+	}
+	r.leaderID = args.LeaderID
+	r.resetElectionTimerLocked()
+
+	// Ignore a snapshot we already cover.
+	if args.LastIncludedIndex <= r.log.SnapshotIndex() || args.LastIncludedIndex <= r.commitIndex {
+		return InstallSnapshotReply{Term: r.currentTerm}
+	}
+
+	if err := r.log.InstallSnapshot(args.LastIncludedIndex, args.LastIncludedTerm, args.Data); err != nil {
+		fmt.Printf("raft %d: install snapshot: %v\n", r.id, err)
+		return InstallSnapshotReply{Term: r.currentTerm}
+	}
+	if r.restoreFn != nil {
+		r.restoreFn(args.Data)
+	}
+	r.lastApplied = args.LastIncludedIndex
+	if r.commitIndex < args.LastIncludedIndex {
+		r.commitIndex = args.LastIncludedIndex
+	}
+	return InstallSnapshotReply{Term: r.currentTerm}
 }
 
 func minU(a, b uint64) uint64 {
