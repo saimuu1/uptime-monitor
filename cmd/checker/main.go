@@ -70,6 +70,7 @@ func handleJob(ctx context.Context, nc *nats.Conn, region string, data []byte) {
 	result := message.CheckResult{
 		MonitorID:       job.MonitorID,
 		Name:            job.Name,
+		URL:             job.URL,
 		Region:          region,
 		CheckedAt:       time.Now(),
 		Up:              res.Up,

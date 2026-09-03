@@ -114,7 +114,7 @@ func runMonitor(ctx context.Context, st *store.Store, m store.Monitor) {
 			}
 			log.Printf("MONITOR DOWN  [%s] %s", m.Name, cause)
 		case evaluate.Recovered:
-			if err := st.ResolveIncident(ctx, m.ID); err != nil {
+			if _, err := st.ResolveIncident(ctx, m.ID); err != nil {
 				log.Printf("[%s] resolve incident: %v", m.Name, err)
 			}
 			log.Printf("MONITOR RECOVERED  [%s] (%dms)", m.Name, res.LatencyMs)

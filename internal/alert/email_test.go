@@ -113,3 +113,77 @@ func TestEmailNoRecipientsIsNoop(t *testing.T) {
 		t.Errorf("expected no-op, got %v", err)
 	}
 }
+
+func TestEmailFormatting(t *testing.T) {
+	down := Event{
+		Monitor: "My API", URL: "https://api.example.com",
+		Kind: Down, Region: "east", Cause: "connection refused",
+		At: time.Date(2026, 9, 2, 15, 4, 0, 0, time.UTC),
+	}
+	if got := down.Subject(); got != "[DOWN] My API - connection refused" {
+		t.Errorf("down subject = %q", got)
+	}
+	plain := down.emailPlain()
+	for _, want := range []string{
+		"My API is down", "Monitor:", "URL:", "https://api.example.com",
+		"Status:", "DOWN", "Reason:", "connection refused",
+		"Confirmed by:", "east", "— Uptime Monitor",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("plain body missing %q\n---\n%s", want, plain)
+		}
+	}
+	htmlBody := down.emailHTML()
+	for _, want := range []string{"#d63b3b", "My API is down", `href="https://api.example.com"`} {
+		if !strings.Contains(htmlBody, want) {
+			t.Errorf("html body missing %q", want)
+		}
+	}
+
+	// Recovered carries downtime in both the subject and the body.
+	rec := Event{Monitor: "My API", Kind: Recovered, Region: "east", Duration: 8 * time.Minute}
+	if got := rec.Subject(); got != "[RESOLVED] My API is back up after 8 minutes" {
+		t.Errorf("recovered subject = %q", got)
+	}
+	if p := rec.emailPlain(); !strings.Contains(p, "Downtime:") || !strings.Contains(p, "8 minutes") {
+		t.Errorf("recovered plain missing downtime\n%s", p)
+	}
+	if a := rec.emailHTML(); !strings.Contains(a, "#17915a") {
+		t.Error("recovered html should use the green accent")
+	}
+
+	// HTML output escapes user-controlled text.
+	evil := Event{Monitor: "A<script>", Kind: Down}
+	if h := evil.emailHTML(); strings.Contains(h, "<script>") {
+		t.Errorf("monitor name not escaped in html:\n%s", h)
+	}
+
+	// buildMIME is genuinely multipart with both bodies.
+	mime := string(buildMIME("from@x.com", []string{"to@x.com"}, "sub", "PLAIN", "<b>HTML</b>"))
+	for _, want := range []string{
+		"multipart/alternative", "text/plain; charset=utf-8",
+		"text/html; charset=utf-8", "PLAIN", "<b>HTML</b>",
+	} {
+		if !strings.Contains(mime, want) {
+			t.Errorf("MIME missing %q", want)
+		}
+	}
+}
+
+func TestHumanizeDuration(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Second, "30 seconds"},
+		{1 * time.Minute, "1 minute"},
+		{8 * time.Minute, "8 minutes"},
+		{65 * time.Minute, "1 hour 5 minutes"},
+		{2 * time.Hour, "2 hours"},
+	}
+	for _, c := range cases {
+		if got := humanizeDuration(c.d); got != c.want {
+			t.Errorf("humanizeDuration(%s) = %q, want %q", c.d, got, c.want)
+		}
+	}
+}

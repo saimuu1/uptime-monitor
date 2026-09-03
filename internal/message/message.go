@@ -34,6 +34,7 @@ type CheckJob struct {
 type CheckResult struct {
 	MonitorID       int64     `json:"monitor_id"`
 	Name            string    `json:"name"`
+	URL             string    `json:"url"` // echoed back so alerts can name the site
 	Region          string    `json:"region"`
 	CheckedAt       time.Time `json:"checked_at"`
 	Up              bool      `json:"up"`

@@ -32,6 +32,7 @@ import (
 type entry struct {
 	id          int64
 	name        string
+	url         string // the monitored URL (for alert context)
 	engine      *evaluate.Monitor
 	lastRegion  string // region of the most recent result (for alert context)
 	lastMs      int    // latency of the most recent result
@@ -99,6 +100,7 @@ func main() {
 		e.monitors[m.ID] = &entry{
 			id:     m.ID,
 			name:   m.Name,
+			url:    m.URL,
 			engine: evaluate.NewMonitor(e.cfg, !open),
 		}
 	}
@@ -169,9 +171,10 @@ func (e *evaluator) handleResult(ctx context.Context, data []byte) {
 
 	en, ok := e.monitors[r.MonitorID]
 	if !ok { // monitor added after startup: assume up as baseline
-		en = &entry{id: r.MonitorID, name: r.Name, engine: evaluate.NewMonitor(e.cfg, true)}
+		en = &entry{id: r.MonitorID, name: r.Name, url: r.URL, engine: evaluate.NewMonitor(e.cfg, true)}
 		e.monitors[r.MonitorID] = en
 	}
+	en.url = r.URL
 	en.lastRegion = r.Region
 	en.lastMs = r.LatencyMs
 	if !r.Up {
@@ -206,7 +209,7 @@ func (e *evaluator) checkSlow(ctx context.Context, en *entry, r message.CheckRes
 	cause := fmt.Sprintf("%dms responses (over %dms) for %d checks", r.LatencyMs, r.SlowThresholdMs, en.slowStreak)
 	log.Printf("SLOW  [%s] %s", en.name, cause)
 	metrics.AlertsSent.WithLabelValues("slow").Inc()
-	e.notify(ctx, en.id, alert.Event{Monitor: en.name, Kind: alert.Slow,
+	e.notify(ctx, en.id, alert.Event{Monitor: en.name, URL: en.url, Kind: alert.Slow,
 		Cause: cause, At: time.Now(), To: e.recipients(ctx, en.id)})
 }
 
@@ -232,7 +235,7 @@ func (e *evaluator) checkCert(ctx context.Context, en *entry, expiry time.Time) 
 	cause := fmt.Sprintf("expires in %d days (%s)", daysLeft, expiry.Format("2006-01-02"))
 	log.Printf("CERT EXPIRING  [%s] %s", en.name, cause)
 	metrics.AlertsSent.WithLabelValues("cert").Inc()
-	e.notify(ctx, en.id, alert.Event{Monitor: en.name, Kind: alert.CertExpiring,
+	e.notify(ctx, en.id, alert.Event{Monitor: en.name, URL: en.url, Kind: alert.CertExpiring,
 		Cause: cause, At: time.Now(), To: e.recipients(ctx, en.id)})
 }
 
@@ -247,16 +250,21 @@ func (e *evaluator) commit(ctx context.Context, en *entry, ev evaluate.Event) {
 		log.Printf("MONITOR DOWN  [%s] %s", en.name, en.downCause)
 		metrics.IncidentsOpened.Inc()
 		metrics.AlertsSent.WithLabelValues("down").Inc()
-		e.notify(ctx, en.id, alert.Event{Monitor: en.name, Kind: alert.Down,
+		e.notify(ctx, en.id, alert.Event{Monitor: en.name, URL: en.url, Kind: alert.Down,
 			Region: en.lastRegion, Cause: en.downCause, At: time.Now(), To: e.recipients(ctx, en.id)})
 	case evaluate.Recovered:
-		if err := e.st.ResolveIncident(ctx, en.id); err != nil {
+		startedAt, err := e.st.ResolveIncident(ctx, en.id)
+		if err != nil {
 			log.Printf("[%s] resolve incident: %v", en.name, err)
+		}
+		var downtime time.Duration
+		if !startedAt.IsZero() {
+			downtime = time.Since(startedAt)
 		}
 		log.Printf("MONITOR RECOVERED  [%s] (%dms)", en.name, en.lastMs)
 		metrics.AlertsSent.WithLabelValues("recovered").Inc()
-		e.notify(ctx, en.id, alert.Event{Monitor: en.name, Kind: alert.Recovered,
-			Region: en.lastRegion, At: time.Now(), To: e.recipients(ctx, en.id)})
+		e.notify(ctx, en.id, alert.Event{Monitor: en.name, URL: en.url, Kind: alert.Recovered,
+			Region: en.lastRegion, At: time.Now(), Duration: downtime, To: e.recipients(ctx, en.id)})
 	}
 	// Keep the per-monitor up/down gauge fresh on every evaluation.
 	up := 0.0

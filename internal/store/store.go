@@ -492,14 +492,21 @@ func (s *Store) RecentIncidentsForUser(ctx context.Context, userID int64, limit 
 	return out, rows.Err()
 }
 
-// ResolveIncident closes the currently-open incident for a monitor.
-func (s *Store) ResolveIncident(ctx context.Context, monitorID int64) error {
+// ResolveIncident closes the currently-open incident for a monitor and returns
+// when it started, so the caller can report how long the outage lasted. A zero
+// time means there was no open incident to resolve.
+func (s *Store) ResolveIncident(ctx context.Context, monitorID int64) (time.Time, error) {
 	const q = `
 		UPDATE incidents SET resolved_at = now()
-		WHERE monitor_id = $1 AND resolved_at IS NULL`
-	_, err := s.pool.Exec(ctx, q, monitorID)
-	if err != nil {
-		return fmt.Errorf("resolve incident: %w", err)
+		WHERE monitor_id = $1 AND resolved_at IS NULL
+		RETURNING started_at`
+	var startedAt time.Time
+	err := s.pool.QueryRow(ctx, q, monitorID).Scan(&startedAt)
+	if err == pgx.ErrNoRows {
+		return time.Time{}, nil
 	}
-	return nil
+	if err != nil {
+		return time.Time{}, fmt.Errorf("resolve incident: %w", err)
+	}
+	return startedAt, nil
 }
